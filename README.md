@@ -6,15 +6,19 @@ owns GPIO assignments, PWM timing, actuator limits, and the final watchdog.
 
 ## Interface
 
-- Subscribes: `/actuators/steering/command` (`std_msgs/msg/Float32`)
+- Subscribes: `/actuators/steering/command` and
+  `/actuators/throttle/command` (`std_msgs/msg/Float32`)
 - Input range: `[-1.0, 1.0]`
-- Serial protocol: `steering <value>` or `steering stop`
+- Serial protocol: `<channel> <value>` or `<channel> stop`
 - Pico steering output: GP2, 50 Hz servo pulses
 - Servo calibration: Hitec HS-645MG, 900/1500/2100 microseconds
+- Pico throttle outputs: RPWM GP4, LPWM GP5, enable GP6, 20 kHz
+- Throttle bridge: HW-039/BTS7960; positive is forward, negative reverse
 
 Commands must arrive continuously. After 250 ms without a ROS command, the
-driver sends `steering stop`. After approximately 520 ms without a valid
-serial command, the Pico independently stops servo pulses.
+driver sends that channel's `stop`. After approximately 520 ms without a
+valid serial command, the Pico independently disables the affected output.
+Steering and throttle use independent watchdog timestamps.
 
 ## Unloaded servo calibration
 
@@ -72,8 +76,8 @@ source ~/ros2_ws/install/setup.bash
 ros2 run pico_ackermann_driver pico_ackermann_driver
 ```
 
-Run `dualshock4_teleop` in a separate terminal. There is deliberately no
-combined launch file.
+Run `dualshock4_teleop` in a separate terminal, or use the application-level
+`robot` package to start the complete system.
 
 ## Servo power
 
@@ -81,8 +85,22 @@ Power the servo from a supply sized for its stall current, not the Pico 3V3
 pin. Connect the servo supply ground and Pico ground. Begin powered tests
 with the teleop mapper's `scale` set to `0.1`.
 
-## Future traction motor
+## Traction motor wiring
 
-GP2 shares RP2040 PWM slice 1 with GP3. A future motor PWM output must use
-another slice, such as GP4/GP5, because the servo uses 50 Hz while a motor
-driver normally uses a kHz-range PWM frequency.
+| HW-039 pin | Pico connection |
+|---|---|
+| RPWM | GP4 |
+| LPWM | GP5 |
+| R_EN and L_EN tied together | GP6 |
+| VCC | Pico 3V3 |
+| GND | Pico/battery common ground |
+| R_IS, L_IS | Not connected |
+
+Connect the motor battery only to `B+`/`B-` and the motor to `M+`/`M-`.
+Never connect the traction battery to a Pico power pin. GP4/GP5 share PWM
+slice 2 at 20 kHz; the steering servo remains on GP2/slice 1 at 50 Hz.
+
+Firmware drives GP6 low before configuring the PWM outputs and on every stop.
+Because RP2040 GPIO is high-impedance before MicroPython starts, fit an
+external pull-down (for example 10 kOhm) from the tied enable input to ground
+if motion during boot must be prevented electrically as well as in software.

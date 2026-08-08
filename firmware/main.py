@@ -23,6 +23,11 @@ STEERING_MAX_US = 2100
 STEERING_HARD_MIN_US = 500
 STEERING_HARD_MAX_US = 2500
 
+THROTTLE_RPWM_PIN = 4
+THROTTLE_LPWM_PIN = 5
+THROTTLE_EN_PIN = 6
+THROTTLE_FREQ_HZ = 20_000
+
 
 class Servo:
     """Drive a calibrated hobby servo from normalized position commands."""
@@ -33,7 +38,7 @@ class Servo:
         self.max_us = max_us
         self.pwm = PWM(Pin(pin), freq=freq, duty_u16=0)
 
-    def set_position(self, value):
+    def set_command(self, value):
         """Set a finite position command, including calibration extension."""
         value = max(-COMMAND_LIMIT, min(COMMAND_LIMIT, value))
         if value >= 0:
@@ -57,6 +62,35 @@ class Servo:
         self.pwm.duty_u16(0)
 
 
+class Motor:
+    """Drive an HW-039/BTS7960 using signed normalized commands."""
+
+    def __init__(self, rpwm_pin, lpwm_pin, en_pin, freq):
+        # Force the shared enable low before configuring either PWM output.
+        self.en = Pin(en_pin, Pin.OUT, value=0)
+        self.rpwm = PWM(Pin(rpwm_pin), freq=freq, duty_u16=0)
+        self.lpwm = PWM(Pin(lpwm_pin), freq=freq, duty_u16=0)
+
+    def set_command(self, value):
+        """Set direction from the sign and duty from the magnitude."""
+        value = max(-1.0, min(1.0, value))
+        duty = int(abs(value) * 65_535)
+
+        if value >= 0:
+            self.lpwm.duty_u16(0)
+            self.rpwm.duty_u16(duty)
+        else:
+            self.rpwm.duty_u16(0)
+            self.lpwm.duty_u16(duty)
+        self.en.value(1)
+
+    def stop(self):
+        """Disable the bridge and clear both PWM outputs for coast."""
+        self.en.value(0)
+        self.rpwm.duty_u16(0)
+        self.lpwm.duty_u16(0)
+
+
 CHANNELS = {
     'steering': Servo(
         STEERING_PIN,
@@ -64,6 +98,12 @@ CHANNELS = {
         STEERING_CENTER_US,
         STEERING_MAX_US,
         STEERING_FREQ_HZ,
+    ),
+    'throttle': Motor(
+        THROTTLE_RPWM_PIN,
+        THROTTLE_LPWM_PIN,
+        THROTTLE_EN_PIN,
+        THROTTLE_FREQ_HZ,
     ),
 }
 
@@ -110,7 +150,7 @@ try:
             if not isfinite(value):
                 continue
 
-            device.set_position(value)
+            device.set_command(value)
             enabled[name] = True
             last_ok[name] = ticks_ms()
 

@@ -16,3 +16,4 @@ def test_clamp_command():
 
 def test_channel_topic():
     assert channel_topic('steering') == '/actuators/steering/command'
+    assert channel_topic('throttle') == '/actuators/throttle/command'
