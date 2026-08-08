@@ -51,9 +51,7 @@ The first command backs up the Pico's existing LED-blink program.
 ```bash
 source /opt/ros/jazzy/setup.bash
 source ~/ros2_ws/install/setup.bash
-ros2 run pico_ackermann_driver pico_ackermann_driver \
-  --ros-args --params-file \
-  $(ros2 pkg prefix pico_ackermann_driver)/share/pico_ackermann_driver/config/pico_ackermann_driver.yaml
+ros2 run pico_ackermann_driver pico_ackermann_driver
 ```
 
 Run `dualshock4_teleop` in a separate terminal. There is deliberately no

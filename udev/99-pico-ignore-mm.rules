@@ -1,2 +1,2 @@
-# Ignore the MicroPython Pico USB CDC device in ModemManager.
-SUBSYSTEM=="tty", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="0005", ENV{ID_MM_DEVICE_IGNORE}="1"
+# Ignore ModemManager and create a stable device alias for the Pico.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2e8a", ATTRS{idProduct}=="0005", ENV{ID_MM_DEVICE_IGNORE}="1", SYMLINK+="pico-ackermann"

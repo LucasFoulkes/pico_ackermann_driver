@@ -1,7 +1,7 @@
 pico_ackermann_driver:
   ros__parameters:
     channels: ["steering"]
-    port: "/dev/serial/by-id/usb-MicroPython_Board_in_FS_mode_e6605481db5aa337-if00"
+    port: "/dev/pico-ackermann"
     baud: 115200
     send_hz: 20.0
     input_timeout: 0.25

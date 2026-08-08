@@ -34,7 +34,7 @@ class PicoAckermannDriver(Node):
         channels = list(
             self.declare_parameter('channels', ['steering']).value)
         self.port = self.declare_parameter(
-            'port', '/dev/ttyACM0').value
+            'port', '/dev/pico-ackermann').value
         self.baud = self.declare_parameter('baud', 115200).value
         send_hz = self.declare_parameter('send_hz', 20.0).value
         self.input_timeout = self.declare_parameter(
