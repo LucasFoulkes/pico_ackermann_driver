@@ -36,7 +36,7 @@ class PicoAckermannDriver(Node):
         self.port = self.declare_parameter(
             'port', '/dev/pico-ackermann').value
         self.baud = self.declare_parameter('baud', 115200).value
-        send_hz = self.declare_parameter('send_hz', 20.0).value
+        send_hz = self.declare_parameter('send_hz', 50.0).value
         self.input_timeout = self.declare_parameter(
             'input_timeout', 0.25).value
 
@@ -93,7 +93,7 @@ class PicoAckermannDriver(Node):
                 and now - updated_ns < timeout_ns
             )
             if fresh:
-                self.send(f'{channel} {value:.3f}\n')
+                self.send(f'{channel} {value:.5f}\n')
             elif not stop_sent and self.send(f'{channel} stop\n'):
                 state[2] = True
 

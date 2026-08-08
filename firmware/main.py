@@ -43,7 +43,7 @@ class Servo:
                 self.center_us
                 + value * (self.center_us - self.min_us)
             )
-        self.pwm.duty_ns(int(pulse_us) * 1000)
+        self.pwm.duty_ns(int(pulse_us * 1000))
 
     def stop(self):
         """Stop servo pulses by holding the PWM output low."""
