@@ -10,6 +10,7 @@ owns GPIO assignments, PWM timing, actuator limits, and the final watchdog.
 - Input range: `[-1.0, 1.0]`
 - Serial protocol: `steering <value>` or `steering stop`
 - Pico steering output: GP2, 50 Hz servo pulses
+- Servo calibration: Hitec HS-645MG, 900/1500/2100 microseconds
 
 Commands must arrive continuously. After 250 ms without a ROS command, the
 driver sends `steering stop`. After approximately 520 ms without a valid
