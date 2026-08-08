@@ -15,9 +15,9 @@ CHANNEL_PATTERN = re.compile(r'^[A-Za-z0-9_]+$')
 TOPIC_PREFIX = '/actuators'
 
 
-def clamp_command(value):
-    """Clamp a finite normalized command to [-1, 1]."""
-    return max(-1.0, min(1.0, value))
+def clamp_command(value, limit=1.0):
+    """Clamp a finite command to a configured symmetric limit."""
+    return max(-limit, min(limit, value))
 
 
 def channel_topic(channel):
@@ -37,6 +37,8 @@ class PicoAckermannDriver(Node):
             'port', '/dev/pico-ackermann').value
         self.baud = self.declare_parameter('baud', 115200).value
         send_hz = self.declare_parameter('send_hz', 50.0).value
+        self.command_limit = self.declare_parameter(
+            'command_limit', 1.0).value
         self.input_timeout = self.declare_parameter(
             'input_timeout', 0.25).value
 
@@ -46,6 +48,8 @@ class PicoAckermannDriver(Node):
             raise ValueError('channel names must be alphanumeric/underscore')
         if send_hz <= 0:
             raise ValueError('send_hz must be greater than zero')
+        if not 0 < self.command_limit <= 2.0:
+            raise ValueError('command_limit must be in (0, 2]')
         if self.input_timeout <= 0:
             raise ValueError('input_timeout must be greater than zero')
         if self.baud <= 0:
@@ -68,14 +72,15 @@ class PicoAckermannDriver(Node):
         self.timer = self.create_timer(1.0 / send_hz, self.tick)
 
         self.get_logger().info(
-            f'channels={channels} port={self.port}')
+            f'channels={channels} port={self.port} '
+            f'command_limit={self.command_limit}')
 
     def on_command(self, channel, message):
         """Store a valid command and its monotonic arrival time."""
         if not math.isfinite(message.data):
             return
         state = self.channels[channel]
-        state[0] = clamp_command(message.data)
+        state[0] = clamp_command(message.data, self.command_limit)
         state[1] = time.monotonic_ns()
         state[2] = False
 

@@ -3,5 +3,6 @@ pico_ackermann_driver:
     channels: ["steering"]
     port: "/dev/pico-ackermann"
     baud: 115200
+    command_limit: 1.0
     send_hz: 50.0
     input_timeout: 0.25

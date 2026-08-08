@@ -13,12 +13,15 @@ from machine import Pin, PWM
 
 WATCHDOG_MS = 500
 MAX_CHARS_PER_PASS = 256
+COMMAND_LIMIT = 2.0
 
 STEERING_PIN = 2
 STEERING_FREQ_HZ = 50
 STEERING_MIN_US = 900
 STEERING_CENTER_US = 1500
 STEERING_MAX_US = 2100
+STEERING_HARD_MIN_US = 500
+STEERING_HARD_MAX_US = 2500
 
 
 class Servo:
@@ -31,8 +34,8 @@ class Servo:
         self.pwm = PWM(Pin(pin), freq=freq, duty_u16=0)
 
     def set_position(self, value):
-        """Set a finite normalized position command in [-1, 1]."""
-        value = max(-1.0, min(1.0, value))
+        """Set a finite position command, including calibration extension."""
+        value = max(-COMMAND_LIMIT, min(COMMAND_LIMIT, value))
         if value >= 0:
             pulse_us = (
                 self.center_us
@@ -43,6 +46,10 @@ class Servo:
                 self.center_us
                 + value * (self.center_us - self.min_us)
             )
+        pulse_us = max(
+            STEERING_HARD_MIN_US,
+            min(STEERING_HARD_MAX_US, pulse_us),
+        )
         self.pwm.duty_ns(int(pulse_us * 1000))
 
     def stop(self):

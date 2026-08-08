@@ -10,6 +10,8 @@ def test_clamp_command():
     assert clamp_command(0.25) == 0.25
     assert clamp_command(2.0) == 1.0
     assert clamp_command(-2.0) == -1.0
+    assert clamp_command(1.5, 2.0) == 1.5
+    assert clamp_command(3.0, 2.0) == 2.0
 
 
 def test_channel_topic():

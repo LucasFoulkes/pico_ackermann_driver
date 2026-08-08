@@ -16,6 +16,23 @@ Commands must arrive continuously. After 250 ms without a ROS command, the
 driver sends `steering stop`. After approximately 520 ms without a valid
 serial command, the Pico independently stops servo pulses.
 
+## Unloaded servo calibration
+
+Normal operation clamps commands to `[-1.0, 1.0]`. With the steering linkage
+disconnected, the driver can explicitly enable calibration commands up to
+`[-2.0, 2.0]`:
+
+```bash
+ros2 run pico_ackermann_driver pico_ackermann_driver \
+  --ros-args -p command_limit:=2.0
+```
+
+The HS-645MG's specified range remains `900-2100 us` at commands `-1.0` and
+`1.0`. Calibration values extrapolate that mapping, with an absolute firmware
+guard of `500-2500 us`. Values outside `[-2.0, 2.0]` are rejected/clamped.
+This mode is outside the servo's published specification and must never be
+used with the steering linkage connected.
+
 ## Build
 
 ```bash
