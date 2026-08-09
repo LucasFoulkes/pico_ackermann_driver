@@ -92,13 +92,15 @@ with the teleop mapper's `scale` set to `0.1`.
 | RPWM | GP4 |
 | LPWM | GP5 |
 | R_EN and L_EN tied together | GP6 |
-| VCC | Pico 3V3 |
+| VCC | Pico VBUS 5 V (physical pin 40) |
 | GND | Pico/battery common ground |
 | R_IS, L_IS | Not connected |
 
 Connect the motor battery only to `B+`/`B-` and the motor to `M+`/`M-`.
 Never connect the traction battery to a Pico power pin. GP4/GP5 share PWM
 slice 2 at 20 kHz; the steering servo remains on GP2/slice 1 at 50 Hz.
+The module logic supply is 5 V, while its RPWM, LPWM, and enable inputs accept
+the Pico's 3.3 V GPIO levels. Never connect VBUS 5 V to a Pico GPIO.
 
 Firmware drives GP6 low before configuring the PWM outputs and on every stop.
 Because RP2040 GPIO is high-impedance before MicroPython starts, fit an
