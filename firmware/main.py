@@ -27,6 +27,7 @@ THROTTLE_RPWM_PIN = 4
 THROTTLE_LPWM_PIN = 5
 THROTTLE_EN_PIN = 6
 THROTTLE_FREQ_HZ = 20_000
+THROTTLE_INVERT = True
 
 
 class Servo:
@@ -65,15 +66,18 @@ class Servo:
 class Motor:
     """Drive an HW-039/BTS7960 using signed normalized commands."""
 
-    def __init__(self, rpwm_pin, lpwm_pin, en_pin, freq):
+    def __init__(self, rpwm_pin, lpwm_pin, en_pin, freq, invert=False):
         # Force the shared enable low before configuring either PWM output.
         self.en = Pin(en_pin, Pin.OUT, value=0)
         self.rpwm = PWM(Pin(rpwm_pin), freq=freq, duty_u16=0)
         self.lpwm = PWM(Pin(lpwm_pin), freq=freq, duty_u16=0)
+        self.invert = invert
 
     def set_command(self, value):
         """Set direction from the sign and duty from the magnitude."""
         value = max(-1.0, min(1.0, value))
+        if self.invert:
+            value = -value
         duty = int(abs(value) * 65_535)
 
         if value >= 0:
@@ -104,6 +108,7 @@ CHANNELS = {
         THROTTLE_LPWM_PIN,
         THROTTLE_EN_PIN,
         THROTTLE_FREQ_HZ,
+        THROTTLE_INVERT,
     ),
 }
 

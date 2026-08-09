@@ -13,7 +13,8 @@ owns GPIO assignments, PWM timing, actuator limits, and the final watchdog.
 - Pico steering output: GP2, 50 Hz servo pulses
 - Servo calibration: Hitec HS-645MG, 900/1500/2100 microseconds
 - Pico throttle outputs: RPWM GP4, LPWM GP5, enable GP6, 20 kHz
-- Throttle bridge: HW-039/BTS7960; positive is forward, negative reverse
+- Throttle bridge: HW-039/BTS7960; positive commands drive the installed
+  motor forward through the firmware's explicit polarity setting
 
 Commands must arrive continuously. After 250 ms without a ROS command, the
 driver sends that channel's `stop`. After approximately 520 ms without a
