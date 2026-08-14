@@ -11,7 +11,7 @@ owns GPIO assignments, PWM timing, actuator limits, and the final watchdog.
 - Input range: `[-1.0, 1.0]`
 - Serial protocol: `<channel> <value>` or `<channel> stop`
 - Pico steering output: GP2, 50 Hz servo pulses
-- Servo calibration: Hitec HS-645MG, 900/1500/2100 microseconds
+- Servo calibration: installed linkage, 1000/1500/2000 microseconds
 - Pico throttle outputs: RPWM GP4, LPWM GP5, enable GP6, 20 kHz
 - Throttle bridge: HW-039/BTS7960; positive commands drive the installed
   motor forward through the firmware's explicit polarity setting
@@ -32,11 +32,10 @@ ros2 run pico_ackermann_driver pico_ackermann_driver \
   --ros-args -p command_limit:=2.0
 ```
 
-The HS-645MG's specified range remains `900-2100 us` at commands `-1.0` and
-`1.0`. Calibration values extrapolate that mapping, with an absolute firmware
-guard of `500-2500 us`. Values outside `[-2.0, 2.0]` are rejected/clamped.
-This mode is outside the servo's published specification and must never be
-used with the steering linkage connected.
+The installed linkage uses `1000-2000 us` at commands `-1.0` and `1.0`.
+Calibration values extrapolate that mapping, with an absolute firmware guard
+of `500-2500 us`. Values outside `[-2.0, 2.0]` are rejected/clamped. This mode
+must never be used with the steering linkage connected.
 
 ## Build
 
