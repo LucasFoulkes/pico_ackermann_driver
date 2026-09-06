@@ -77,9 +77,11 @@ class PicoAckermannDriver(Node):
 
     def on_command(self, channel, message):
         """Store a valid command and its monotonic arrival time."""
-        if not math.isfinite(message.data):
-            return
         state = self.channels[channel]
+        if not math.isfinite(message.data):
+            # Invalid input revokes the previous command immediately.
+            state[:] = [0.0, None, False]
+            return
         state[0] = clamp_command(message.data, self.command_limit)
         state[1] = time.monotonic_ns()
         state[2] = False
@@ -148,11 +150,14 @@ class PicoAckermannDriver(Node):
     def close(self):
         """Release the serial device during clean process shutdown."""
         if self.serial_port is not None:
-            try:
-                self.serial_port.close()
-            except (serial.SerialException, OSError):
-                pass
-            self.serial_port = None
+            for channel in self.channels:
+                self.send(f'{channel} stop\n')
+            if self.serial_port is not None:
+                try:
+                    self.serial_port.close()
+                except (serial.SerialException, OSError):
+                    pass
+                self.serial_port = None
 
 
 def main(args=None):
