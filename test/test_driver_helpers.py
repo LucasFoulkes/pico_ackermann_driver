@@ -38,3 +38,37 @@ def test_clean_shutdown_sends_channel_stops_before_closing():
     PicoAckermannDriver.close(n)
     assert events==['steering stop\n','throttle stop\n','closed']
     assert n.serial_port is None
+
+
+def test_disconnect_revokes_delivered_state_and_rearms_stop_messages():
+    from types import SimpleNamespace as NS
+    from pico_ackermann_driver.driver_node import PicoAckermannDriver
+    n=NS(serial_port=NS(close=lambda:None),delivered={'throttle':(.3,True)},
+         channels={'throttle':[0.,None,True]},get_logger=lambda:NS(warning=lambda *_:None))
+    PicoAckermannDriver.disconnect(n,'test disconnect')
+    assert n.serial_port is None
+    assert n.delivered=={}
+    assert not n.channels['throttle'][2]
+
+
+def test_failed_write_is_never_reported_as_delivered_command():
+    from types import SimpleNamespace as NS
+    from pico_ackermann_driver.driver_node import PicoAckermannDriver
+    import time
+    n=NS(serial_port=object(),input_timeout=.25,command_conflict=False,check_owners=lambda:None,
+         channels={'throttle':[.4,time.monotonic_ns(),False]},delivered={},
+         send=lambda _:False,publish_state=lambda:None)
+    PicoAckermannDriver.tick(n)
+    assert n.delivered=={}
+
+
+def test_conflicting_publishers_revoke_both_actuator_channels():
+    from types import SimpleNamespace as NS
+    from pico_ackermann_driver.driver_node import PicoAckermannDriver
+    n=NS(owner_check_at=0.,command_conflict=False,
+         channels={'steering':[.4,1,False],'throttle':[.3,1,False]},
+         get_publishers_info_by_topic=lambda _:[object(),object()],
+         get_logger=lambda:NS(warning=lambda *_:None))
+    PicoAckermannDriver.check_owners(n)
+    assert n.command_conflict
+    assert all(state==[0.,None,False] for state in n.channels.values())

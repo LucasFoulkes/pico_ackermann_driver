@@ -23,7 +23,6 @@ setup(
          glob('config/*.yaml')),
     ],
     install_requires=['setuptools'],
-    tests_require=['pytest'],
     zip_safe=True,
     maintainer='Lucas Foulkes',
     maintainer_email='lucasfoulkes@gmail.com',

@@ -9,6 +9,7 @@ import rclpy
 from rclpy.node import Node
 import serial
 from std_msgs.msg import Float32
+from robot_interfaces.msg import ActuatorState
 
 
 CHANNEL_PATTERN = re.compile(r'^[A-Za-z0-9_]+$')
@@ -56,6 +57,10 @@ class PicoAckermannDriver(Node):
             raise ValueError('baud must be greater than zero')
 
         self.serial_port = None
+        self.delivered = {}
+        self.command_conflict = False
+        self.owner_check_at = 0.0
+        self.state_pub = self.create_publisher(ActuatorState, '/actuators/state', 5)
         self.channels = {
             name: [0.0, None, False]
             for name in channels
@@ -88,6 +93,7 @@ class PicoAckermannDriver(Node):
 
     def tick(self):
         """Refresh active channels and stop channels that become stale."""
+        self.check_owners()
         if self.serial_port is None:
             self.connect()
 
@@ -96,13 +102,44 @@ class PicoAckermannDriver(Node):
         for channel, state in self.channels.items():
             value, updated_ns, stop_sent = state
             fresh = (
-                updated_ns is not None
+                not self.command_conflict
+                and updated_ns is not None
                 and now - updated_ns < timeout_ns
             )
             if fresh:
-                self.send(f'{channel} {value:.5f}\n')
+                if self.send(f'{channel} {value:.5f}\n'):
+                    self.delivered[channel] = (float(f'{value:.5f}'), True)
             elif not stop_sent and self.send(f'{channel} stop\n'):
                 state[2] = True
+                self.delivered[channel] = (0.0, False)
+        self.publish_state()
+
+    def check_owners(self):
+        now = time.monotonic()
+        if now-self.owner_check_at < .2:
+            return
+        self.owner_check_at = now
+        conflict = any(len(self.get_publishers_info_by_topic(channel_topic(channel))) > 1
+                       for channel in self.channels)
+        if conflict != self.command_conflict:
+            self.get_logger().warning('multiple actuator publishers: stopping' if conflict else 'actuator ownership restored; waiting for fresh commands')
+            for state in self.channels.values():
+                state[:] = [0.0, None, False]
+        self.command_conflict = conflict
+
+    def publish_state(self):
+        connected = self.serial_port is not None
+        steer, steer_on = self.delivered.get('steering', (0.0, False))
+        drive, drive_on = self.delivered.get('throttle', (0.0, False))
+        msg = ActuatorState()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.connected = connected
+        msg.command_conflict = self.command_conflict
+        msg.steering_active = connected and steer_on
+        msg.throttle_active = connected and drive_on
+        msg.steering = float(steer) if connected else 0.0
+        msg.throttle = float(drive) if connected else 0.0
+        self.state_pub.publish(msg)
 
     def connect(self):
         """Open the configured serial device and clear a partial line."""
@@ -146,6 +183,9 @@ class PicoAckermannDriver(Node):
             except (serial.SerialException, OSError):
                 pass
         self.serial_port = None
+        self.delivered.clear()
+        for state in self.channels.values():
+            state[2] = False
 
     def close(self):
         """Release the serial device during clean process shutdown."""

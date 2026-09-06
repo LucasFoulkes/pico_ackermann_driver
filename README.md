@@ -106,3 +106,17 @@ Firmware drives GP6 low before configuring the PWM outputs and on every stop.
 Because RP2040 GPIO is high-impedance before MicroPython starts, fit an
 external pull-down (for example 10 kOhm) from the tied enable input to ground
 if motion during boot must be prevented electrically as well as in software.
+
+## Delivery status
+
+`/actuators/state` (`robot_interfaces/msg/ActuatorState`) reports normalized
+commands successfully written to the serial link, connection status, channel
+activation and a ROS timestamp. This lets the adaptive learner align inputs to
+odometry and suspend updates on a disconnect. It is not measured wheel speed,
+steering angle or a firmware acknowledgment. A reconnect clears stop bookkeeping
+so the driver sends explicit stops for inactive channels again.
+
+The driver stops both channels when it detects multiple publishers on an
+actuator command topic (checked at 5 Hz). It resumes only after ownership is
+unambiguous and fresh commands arrive. Raw manual and autonomous launches are
+mutually exclusive; this is an ownership guard, not a velocity multiplexer.
