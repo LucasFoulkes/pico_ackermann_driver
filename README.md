@@ -3,13 +3,13 @@
 This repository contains two ROS 2 packages:
 
 - [`pico_ackermann_driver`](pico_ackermann_driver/README.md): USB serial driver, Pico firmware, configuration, and driver tests.
-- [`robot_interfaces`](robot_interfaces/README.md): shared `ActuatorState` message used by the driver, adaptive controller, and recovery nodes.
+- [`ackermann_interfaces`](ackermann_interfaces/README.md): shared `ActuatorState` message used by the driver, adaptive controller, and recovery nodes.
 
 Clone this repository into your workspace `src` directory. Colcon discovers both packages automatically.
 
 ```sh
 cd ~/ros2_ws
-colcon build --symlink-install --packages-select robot_interfaces pico_ackermann_driver
+colcon build --symlink-install --packages-select ackermann_interfaces pico_ackermann_driver
 source install/setup.bash
 cd src/pico_ackermann_driver/pico_ackermann_driver
 python3 -m pytest test

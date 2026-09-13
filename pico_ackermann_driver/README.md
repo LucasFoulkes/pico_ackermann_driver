@@ -109,7 +109,7 @@ if motion during boot must be prevented electrically as well as in software.
 
 ## Delivery status
 
-`/actuators/state` (`robot_interfaces/msg/ActuatorState`) reports normalized
+`/actuators/state` (`ackermann_interfaces/msg/ActuatorState`) reports normalized
 commands successfully written to the serial link, connection status, channel
 activation and a ROS timestamp. This lets the adaptive learner align inputs to
 odometry and suspend updates on a disconnect. It is not measured wheel speed,

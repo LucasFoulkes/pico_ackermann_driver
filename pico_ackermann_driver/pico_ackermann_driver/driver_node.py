@@ -9,7 +9,7 @@ import rclpy
 from rclpy.node import Node
 import serial
 from std_msgs.msg import Float32
-from robot_interfaces.msg import ActuatorState
+from ackermann_interfaces.msg import ActuatorState
 
 
 CHANNEL_PATTERN = re.compile(r'^[A-Za-z0-9_]+$')

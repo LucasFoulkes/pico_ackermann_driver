@@ -2,9 +2,6 @@
 # Use of this source code is governed by an MIT-style license that can be found
 # in the LICENSE file or at https://opensource.org/licenses/MIT.
 
-from glob import glob
-import os
-
 from setuptools import find_packages, setup
 
 
@@ -19,8 +16,8 @@ setup(
         ('share/ament_index/resource_index/packages',
          ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml', 'LICENSE']),
-        (os.path.join('share', package_name, 'config'),
-         glob('config/*.yaml')),
+        ('share/' + package_name + '/config',
+         ['config/pico_ackermann_driver.yaml']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

@@ -1,4 +1,4 @@
-# Robot interfaces
+# Ackermann interfaces
 
 `ActuatorState` reports the timestamp and normalized steering/throttle values
 successfully written by the Pico driver, serial connectivity, channel activity,
