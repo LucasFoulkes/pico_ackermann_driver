@@ -59,6 +59,7 @@ class PicoAckermannDriver(Node):
         self.serial_port = None
         self.delivered = {}
         self.command_conflict = False
+        self.connect_error = None  # last reason the port would not open, logged once
         self.owner_check_at = 0.0
         self.state_pub = self.create_publisher(ActuatorState, '/actuators/state', 5)
         self.channels = {
@@ -156,7 +157,10 @@ class PicoAckermannDriver(Node):
                 return
             self.serial_port = candidate
             self.get_logger().info(f'connected to {self.port}')
-        except (serial.SerialException, OSError):
+        except (serial.SerialException, OSError) as error:
+            if self.serial_port is None and str(error) != self.connect_error:
+                self.get_logger().warning(f'cannot open {self.port}: {error}')
+            self.connect_error = str(error)
             self.serial_port = None
 
     def send(self, line):
@@ -170,8 +174,8 @@ class PicoAckermannDriver(Node):
             if written == len(payload):
                 return True
             self.disconnect('partial serial write')
-        except (serial.SerialException, OSError):
-            self.disconnect(f'lost {self.port}')
+        except (serial.SerialException, OSError) as error:
+            self.disconnect(f'lost {self.port} ({type(error).__name__}: {error})')
         return False
 
     def disconnect(self, reason):
