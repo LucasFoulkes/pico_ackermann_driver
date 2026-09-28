@@ -18,8 +18,10 @@ owns GPIO assignments, PWM timing, actuator limits, and the final watchdog.
 
 Commands must arrive continuously. After 250 ms without a ROS command, the
 driver sends that channel's `stop`. After approximately 520 ms without a
-valid serial command, the Pico independently disables the affected output.
-Steering and throttle use independent watchdog timestamps.
+valid serial command, the Pico independently stops the affected output.
+Steering and throttle use independent watchdog timestamps. A throttle `stop`
+brakes (bridge enabled, both sides low) so the car holds on a slope; a
+steering `stop` ends the servo pulses.
 
 ## Unloaded servo calibration
 
@@ -102,8 +104,8 @@ slice 2 at 20 kHz; the steering servo remains on GP2/slice 1 at 50 Hz.
 The module logic supply is 5 V, while its RPWM, LPWM, and enable inputs accept
 the Pico's 3.3 V GPIO levels. Never connect VBUS 5 V to a Pico GPIO.
 
-Firmware drives GP6 low before configuring the PWM outputs and on every stop.
-Because RP2040 GPIO is high-impedance before MicroPython starts, fit an
+Firmware drives GP6 low before configuring the PWM outputs, so the bridge is
+disabled from power-up until the first command. Because RP2040 GPIO is high-impedance before MicroPython starts, fit an
 external pull-down (for example 10 kOhm) from the tied enable input to ground
 if motion during boot must be prevented electrically as well as in software.
 

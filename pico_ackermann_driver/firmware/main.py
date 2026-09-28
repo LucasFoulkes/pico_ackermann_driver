@@ -89,10 +89,15 @@ class Motor:
         self.en.value(1)
 
     def stop(self):
-        """Disable the bridge and clear both PWM outputs for coast."""
-        self.en.value(0)
+        """Brake: both half-bridges low with the bridge enabled.
+
+        Disabling the bridge would let the motor freewheel, and a car parked
+        on a hill would roll away whenever the Pi, USB or the driver drops.
+        The bridge stays disabled only from power-up until the first command.
+        """
         self.rpwm.duty_u16(0)
         self.lpwm.duty_u16(0)
+        self.en.value(1)
 
 
 CHANNELS = {
@@ -116,7 +121,11 @@ last_ok = {}
 enabled = {}
 poller = select.poll()
 poller.register(sys.stdin, select.POLLIN)
-buffer = ''
+# Bytes, not text: the text stream blocks waiting for the rest of a UTF-8
+# sequence after a stray byte >= 0x80, and the watchdog below would not run.
+stdin = sys.stdin.buffer
+buffer = b''
+overlong = False  # drop the rest of a line that was too long to be a command
 
 
 try:
@@ -125,18 +134,26 @@ try:
 
         chars_read = 0
         while chars_read < MAX_CHARS_PER_PASS and poller.poll(0):
-            char = sys.stdin.read(1)
+            char = stdin.read(1)
             if not char:
                 break
             chars_read += 1
 
-            if char != '\n':
-                buffer += char
-                if len(buffer) > 64:
-                    buffer = ''
+            if char != b'\n':
+                if not overlong:
+                    buffer += char
+                    if len(buffer) > 64:
+                        buffer, overlong = b'', True
                 continue
 
-            line, buffer = buffer.strip(), ''
+            if overlong:
+                buffer, overlong = b'', False
+                continue
+            try:
+                line = buffer.decode().strip()
+            except UnicodeError:
+                line = ''
+            buffer = b''
             parts = line.split()
             if len(parts) != 2 or parts[0] not in CHANNELS:
                 continue
