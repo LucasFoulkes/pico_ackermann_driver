@@ -99,10 +99,16 @@ slice 2 at 20 kHz; the steering servo remains on GP2/slice 1 at 50 Hz.
 The module logic supply is 5 V, while its RPWM, LPWM, and enable inputs accept
 the Pico's 3.3 V GPIO levels. Never connect VBUS 5 V to a Pico GPIO.
 
-Firmware drives GP6 low before configuring the PWM outputs, so the bridge is
-disabled from power-up until the first command. Because RP2040 GPIO is high-impedance before MicroPython starts, fit an
-external pull-down (for example 10 kOhm) from the tied enable input to ground
-if motion during boot must be prevented electrically as well as in software.
+At start the firmware drives GP6 low, sets both PWM outputs to 0 and only
+then drives GP6 high: the motor brakes from boot, so a Pico reset (for
+example a brown-out) does not let the car roll on a slope. The steering
+servo gets no pulses until the first steering command.
+
+Between power-up and the start of `main.py` the bridge is disabled
+(the motor freewheels): RP2040 pads come out of reset as inputs with weak
+internal pull-downs (roughly 50 kOhm), which hold the enable low. Fit an
+external pull-down (for example 10 kOhm) from the tied enable input to
+ground if that low must not depend on the internal pull-down.
 
 ## Delivery status
 

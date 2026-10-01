@@ -65,11 +65,15 @@ class Motor:
     """Drive an HW-039/BTS7960 using signed normalized commands."""
 
     def __init__(self, rpwm_pin, lpwm_pin, en_pin, freq, invert=False):
-        # Force the shared enable low before configuring either PWM output.
+        # The shared enable goes low before either PWM output is touched (after
+        # a soft reset the pins hold what the previous run left on them), and
+        # high only once both duties are 0: braked from boot, so a car reset by
+        # a brown-out on a slope holds instead of rolling.
         self.en = Pin(en_pin, Pin.OUT, value=0)
         self.rpwm = PWM(Pin(rpwm_pin), freq=freq, duty_u16=0)
         self.lpwm = PWM(Pin(lpwm_pin), freq=freq, duty_u16=0)
         self.invert = invert
+        self.stop()
 
     def set_command(self, value):
         """Set direction from the sign and duty from the magnitude."""
@@ -91,7 +95,7 @@ class Motor:
 
         Disabling the bridge would let the motor freewheel, and a car parked
         on a hill would roll away whenever the Pi, USB or the driver drops.
-        The bridge stays disabled only from power-up until the first command.
+        The bridge is disabled only from power-up until this firmware starts.
         """
         self.rpwm.duty_u16(0)
         self.lpwm.duty_u16(0)

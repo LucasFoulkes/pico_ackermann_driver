@@ -13,6 +13,7 @@ from types import ModuleType, SimpleNamespace as NS
 
 FIRMWARE = Path(__file__).resolve().parents[1] / 'firmware' / 'main.py'
 STEERING, RPWM, LPWM, EN = 2, 4, 5, 6
+LOOP = ('loop', None, None)  # logged when the main loop first waits for input
 
 
 def run_firmware(monkeypatch, data=b''):
@@ -45,6 +46,8 @@ def run_firmware(monkeypatch, data=b''):
             pass
 
         def poll(self, timeout):
+            if LOOP not in events:
+                events.append(LOOP)
             if pending:
                 return [True]
             if timeout:
@@ -76,13 +79,23 @@ def run_firmware(monkeypatch, data=b''):
 
 
 def levels(events):
-    """Each pin's last level or duty after every event."""
+    """Each pin's level, duty or pulse width after every output change."""
     state, history = {}, []
     for kind, number, value in events:
-        if kind != 'kbd_intr':
+        if kind in ('pin', 'duty', 'ns'):
             state[number] = value
             history.append(dict(state))
     return history
+
+
+def test_the_motor_brakes_from_boot_and_the_servo_waits(monkeypatch):
+    events = run_firmware(monkeypatch)
+    boot = events[:events.index(LOOP)]
+    motor = [event for event in boot if event[1] in (RPWM, LPWM, EN)]
+    assert motor[0] == ('pin', EN, 0)  # bridge off before either PWM output is touched
+    for state in levels(boot):
+        assert not (state.get(EN) == 1 and (state.get(RPWM) or state.get(LPWM)))
+    assert levels(boot)[-1] == {STEERING: 0, RPWM: 0, LPWM: 0, EN: 1}
 
 
 def test_commands_are_clamped_to_the_installed_range(monkeypatch):
