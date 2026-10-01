@@ -52,8 +52,8 @@ class PicoAckermannDriver(Node):
             raise ValueError('channel names must be alphanumeric/underscore')
         if send_hz <= 0:
             raise ValueError('send_hz must be greater than zero')
-        if not 0 < self.command_limit <= 2.0:
-            raise ValueError('command_limit must be in (0, 2]')
+        if not 0 < self.command_limit <= 1.0:  # the firmware clamps to 1 as well
+            raise ValueError('command_limit must be in (0, 1]')
         if self.input_timeout <= 0:
             raise ValueError('input_timeout must be greater than zero')
         if self.baud <= 0:

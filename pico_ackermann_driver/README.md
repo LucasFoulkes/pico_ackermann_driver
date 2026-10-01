@@ -25,21 +25,14 @@ Steering and throttle use independent watchdog timestamps. A throttle `stop`
 brakes (bridge enabled, both sides low) so the car holds on a slope; a
 steering `stop` ends the servo pulses.
 
-## Unloaded servo calibration
+## Command limits and servo calibration
 
-Normal operation clamps commands to `[-1.0, 1.0]`. With the steering linkage
-disconnected, the driver can explicitly enable calibration commands up to
-`[-2.0, 2.0]`:
-
-```bash
-ros2 run pico_ackermann_driver pico_ackermann_driver \
-  --ros-args -p command_limit:=2.0
-```
-
-The installed linkage uses `1000-2000 us` at commands `-1.0` and `1.0`.
-Calibration values extrapolate that mapping, with an absolute firmware guard
-of `500-2500 us`. Values outside `[-2.0, 2.0]` are rejected/clamped. This mode
-must never be used with the steering linkage connected.
+The firmware clamps both channels to `[-1.0, 1.0]`, whatever it receives. The
+installed steering linkage uses `1000-2000 us` at commands `-1.0` and `1.0`
+(`STEERING_MIN_US`, `STEERING_CENTER_US`, `STEERING_MAX_US` in
+`firmware/main.py`); to recalibrate, change those with the linkage
+disconnected and flash the firmware again. The driver's `command_limit`
+(default `1.0`, at most `1.0`) can only narrow the range further.
 
 ## Build
 

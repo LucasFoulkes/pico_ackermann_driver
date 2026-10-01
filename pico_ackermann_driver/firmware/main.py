@@ -13,15 +13,17 @@ from machine import Pin, PWM
 
 WATCHDOG_MS = 500
 MAX_CHARS_PER_PASS = 256
-COMMAND_LIMIT = 2.0
+# Both channels clamp here, whatever the driver sends: -1/1 are full throttle
+# and the ends of the installed steering linkage.
+COMMAND_LIMIT = 1.0
 
 STEERING_PIN = 2
 STEERING_FREQ_HZ = 50
+# Installed linkage travel at commands -1, 0 and 1. To recalibrate, edit these
+# with the linkage disconnected and flash again.
 STEERING_MIN_US = 1000
 STEERING_CENTER_US = 1500
 STEERING_MAX_US = 2000
-STEERING_HARD_MIN_US = 500
-STEERING_HARD_MAX_US = 2500
 
 THROTTLE_RPWM_PIN = 4
 THROTTLE_LPWM_PIN = 5
@@ -40,7 +42,7 @@ class Servo:
         self.pwm = PWM(Pin(pin), freq=freq, duty_u16=0)
 
     def set_command(self, value):
-        """Set a finite position command, including calibration extension."""
+        """Set a finite position command, clamped to min_us..max_us."""
         value = max(-COMMAND_LIMIT, min(COMMAND_LIMIT, value))
         if value >= 0:
             pulse_us = (
@@ -52,10 +54,6 @@ class Servo:
                 self.center_us
                 + value * (self.center_us - self.min_us)
             )
-        pulse_us = max(
-            STEERING_HARD_MIN_US,
-            min(STEERING_HARD_MAX_US, pulse_us),
-        )
         self.pwm.duty_ns(int(pulse_us * 1000))
 
     def stop(self):
@@ -75,7 +73,7 @@ class Motor:
 
     def set_command(self, value):
         """Set direction from the sign and duty from the magnitude."""
-        value = max(-1.0, min(1.0, value))
+        value = max(-COMMAND_LIMIT, min(COMMAND_LIMIT, value))
         if self.invert:
             value = -value
         duty = int(abs(value) * 65_535)
