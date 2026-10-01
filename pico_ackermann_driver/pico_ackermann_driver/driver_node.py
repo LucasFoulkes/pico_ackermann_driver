@@ -37,7 +37,10 @@ class PicoAckermannDriver(Node):
         self.port = self.declare_parameter(
             'port', '/dev/pico-ackermann').value
         self.baud = self.declare_parameter('baud', 115200).value
-        send_hz = self.declare_parameter('send_hz', 50.0).value
+        # Commands go to the Pico as they arrive; this rate only resends them (the Pico stops a
+        # channel after ~0.5 s without one) and stops stale channels. At 50 Hz the wake-ups of this
+        # Python node, not the serial writes, were its CPU (2026-09-30).
+        send_hz = self.declare_parameter('send_hz', 10.0).value
         self.command_limit = self.declare_parameter(
             'command_limit', 1.0).value
         self.input_timeout = self.declare_parameter(
@@ -91,6 +94,10 @@ class PicoAckermannDriver(Node):
         state[0] = clamp_command(message.data, self.command_limit)
         state[1] = time.monotonic_ns()
         state[2] = False
+        # Out now, not at the next keep-alive tick, and reported as delivered at once.
+        if not self.command_conflict and self.send(f'{channel} {state[0]:.5f}\n'):
+            self.delivered[channel] = (float(f'{state[0]:.5f}'), True)
+            self.publish_state()
 
     def tick(self):
         """Refresh active channels and stop channels that become stale."""
@@ -117,7 +124,7 @@ class PicoAckermannDriver(Node):
 
     def check_owners(self):
         now = time.monotonic()
-        if now-self.owner_check_at < .2:
+        if now-self.owner_check_at < 1.0:   # a graph query: costly in Python, so once a second
             return
         self.owner_check_at = now
         conflict = any(len(self.get_publishers_info_by_topic(channel_topic(channel))) > 1

@@ -16,6 +16,8 @@ owns GPIO assignments, PWM timing, actuator limits, and the final watchdog.
 - Throttle bridge: HW-039/BTS7960; positive commands drive the installed
   motor forward through the firmware's explicit polarity setting
 
+Each command is written to the Pico as it arrives and reported on `/actuators/state`;
+the driver resends the latest one at `send_hz` (10 Hz) to keep the Pico's watchdog fed.
 Commands must arrive continuously. After 250 ms without a ROS command, the
 driver sends that channel's `stop`. After approximately 520 ms without a
 valid serial command, the Pico independently stops the affected output.
@@ -119,6 +121,6 @@ steering angle or a firmware acknowledgment. A reconnect clears stop bookkeeping
 so the driver sends explicit stops for inactive channels again.
 
 The driver stops both channels when it detects multiple publishers on an
-actuator command topic (checked at 5 Hz). It resumes only after ownership is
+actuator command topic (checked once a second). It resumes only after ownership is
 unambiguous and fresh commands arrive. Raw manual and autonomous launches are
 mutually exclusive; this is an ownership guard, not a velocity multiplexer.

@@ -72,3 +72,33 @@ def test_conflicting_publishers_revoke_both_actuator_channels():
     PicoAckermannDriver.check_owners(n)
     assert n.command_conflict
     assert all(state==[0.,None,False] for state in n.channels.values())
+
+
+def test_a_command_goes_to_the_pico_at_once_and_is_reported_delivered():
+    from types import SimpleNamespace as NS
+    from pico_ackermann_driver.driver_node import PicoAckermannDriver
+    sent, reported = [], []
+    n=NS(channels={'throttle':[0.,None,False]},command_limit=1.,command_conflict=False,delivered={},
+         send=lambda line:sent.append(line) or True,publish_state=lambda:reported.append(True))
+    PicoAckermannDriver.on_command(n,'throttle',NS(data=.3))
+    assert sent==['throttle 0.30000\n']
+    assert n.delivered['throttle']==(.3,True) and reported
+
+
+def test_no_command_goes_out_while_ownership_is_in_conflict():
+    from types import SimpleNamespace as NS
+    from pico_ackermann_driver.driver_node import PicoAckermannDriver
+    sent=[]
+    n=NS(channels={'throttle':[0.,None,False]},command_limit=1.,command_conflict=True,delivered={},
+         send=lambda line:sent.append(line) or True,publish_state=lambda:None)
+    PicoAckermannDriver.on_command(n,'throttle',NS(data=.3))
+    assert sent==[] and n.delivered=={}
+
+
+def test_a_failed_write_on_arrival_is_not_reported_delivered():
+    from types import SimpleNamespace as NS
+    from pico_ackermann_driver.driver_node import PicoAckermannDriver
+    n=NS(channels={'throttle':[0.,None,False]},command_limit=1.,command_conflict=False,delivered={},
+         send=lambda _:False,publish_state=lambda:None)
+    PicoAckermannDriver.on_command(n,'throttle',NS(data=.3))
+    assert n.delivered=={}
