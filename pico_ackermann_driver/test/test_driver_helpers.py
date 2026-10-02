@@ -81,13 +81,34 @@ def test_channel_topic():
     assert channel_topic('throttle') == '/actuators/throttle/command'
 
 
-def test_invalid_input_revokes_the_previous_drive_command():
+def test_invalid_input_stops_the_channel_on_the_pico_at_once(monkeypatch):
     from types import SimpleNamespace as NS
-    from pico_ackermann_driver.driver_node import PicoAckermannDriver
+    use_clock(monkeypatch,100.)
     for value in (float('nan'),float('inf'),-float('inf')):
-        n=NS(channels={'throttle':[.5,123,False]},command_limit=1.)
-        PicoAckermannDriver.on_command(n,'throttle',NS(data=value))
-        assert n.channels['throttle']==[0.,None,False]
+        port=FakePort()
+        n=make_driver(serial_port=port,pico_running=True)
+        n.channels['throttle']=[.5,123,None]
+        n.delivered['throttle']=(.5,True)
+        n.on_command('throttle',NS(data=value))
+        assert port.written==[b'throttle stop\n']
+        assert n.channels['throttle']==[0.,None,100_000_000_000]
+        assert not n.published[-1].throttle_active and n.published[-1].throttle==0.
+
+
+def test_an_idle_channel_is_stopped_again_every_second(monkeypatch):
+    # A Pico that reset or was unplugged while idle is noticed, and a rebooted one is told again.
+    clock=use_clock(monkeypatch,100.)
+    port=FakePort()
+    n=make_driver(serial_port=port,pico_running=True,watch_pico=lambda:None,
+                  channels={'throttle':[.3,round(99.5e9),None]})
+    n.tick()
+    assert port.written==[b'throttle stop\n']
+    clock.t=100.9
+    n.tick()
+    assert len(port.written)==1
+    clock.t=101.
+    n.tick()
+    assert port.written==[b'throttle stop\n']*2
 
 
 def test_clean_shutdown_sends_channel_stops_before_closing():
@@ -143,13 +164,10 @@ def test_a_failed_write_on_connect_releases_the_port(monkeypatch):
 
 
 def test_failed_write_is_never_reported_as_delivered_command():
-    from types import SimpleNamespace as NS
-    from pico_ackermann_driver.driver_node import PicoAckermannDriver
     import time
-    n=NS(serial_port=object(),input_timeout=.25,command_conflict=False,check_owners=lambda:None,
-         channels={'throttle':[.4,time.monotonic_ns(),False]},delivered={},
-         watch_pico=lambda:None,send=lambda _:False,publish_state=lambda:None)
-    PicoAckermannDriver.tick(n)
+    n=make_driver(serial_port=object(),watch_pico=lambda:None,send=lambda _:False,
+                  channels={'throttle':[.4,time.monotonic_ns(),None]})
+    n.tick()
     assert n.delivered=={}
 
 
@@ -157,41 +175,46 @@ def test_conflicting_publishers_revoke_both_actuator_channels():
     from types import SimpleNamespace as NS
     from pico_ackermann_driver.driver_node import PicoAckermannDriver
     n=NS(owner_check_at=0.,command_conflict=False,
-         channels={'steering':[.4,1,False],'throttle':[.3,1,False]},
+         channels={'steering':[.4,1,None],'throttle':[.3,1,None]},
          get_publishers_info_by_topic=lambda _:[object(),object()],
          get_logger=lambda:NS(warning=lambda *_:None))
     PicoAckermannDriver.check_owners(n)
     assert n.command_conflict
-    assert all(state==[0.,None,False] for state in n.channels.values())
+    assert all(state==[0.,None,None] for state in n.channels.values())
 
 
 def test_a_command_goes_to_the_pico_at_once_and_is_reported_delivered():
     from types import SimpleNamespace as NS
-    from pico_ackermann_driver.driver_node import PicoAckermannDriver
-    sent, reported = [], []
-    n=NS(channels={'throttle':[0.,None,False]},command_limit=1.,command_conflict=False,delivered={},
-         send=lambda line:sent.append(line) or True,publish_state=lambda:reported.append(True))
-    PicoAckermannDriver.on_command(n,'throttle',NS(data=.3))
-    assert sent==['throttle 0.30000\n']
-    assert n.delivered['throttle']==(.3,True) and reported
+    port=FakePort()
+    n=make_driver(serial_port=port,pico_running=True)
+    n.on_command('throttle',NS(data=.3))
+    assert port.written==[b'throttle 0.30000\n']
+    assert n.delivered['throttle']==(.3,True)
+    assert n.published[-1].throttle_active and n.published[-1].throttle==.3
+
+
+def test_the_value_reported_is_the_one_sent():
+    from types import SimpleNamespace as NS
+    port=FakePort()
+    n=make_driver(serial_port=port,pico_running=True,command_limit=.8)
+    n.on_command('steering',NS(data=-.123456789))
+    n.on_command('throttle',NS(data=3.))
+    assert port.written==[b'steering -0.12346\n',b'throttle 0.80000\n']
+    assert n.delivered=={'steering':(-.12346,True),'throttle':(.8,True)}
 
 
 def test_no_command_goes_out_while_ownership_is_in_conflict():
     from types import SimpleNamespace as NS
-    from pico_ackermann_driver.driver_node import PicoAckermannDriver
-    sent=[]
-    n=NS(channels={'throttle':[0.,None,False]},command_limit=1.,command_conflict=True,delivered={},
-         send=lambda line:sent.append(line) or True,publish_state=lambda:None)
-    PicoAckermannDriver.on_command(n,'throttle',NS(data=.3))
-    assert sent==[] and n.delivered=={}
+    port=FakePort()
+    n=make_driver(serial_port=port,command_conflict=True)
+    n.on_command('throttle',NS(data=.3))
+    assert port.written==[] and n.delivered=={}
 
 
 def test_a_failed_write_on_arrival_is_not_reported_delivered():
     from types import SimpleNamespace as NS
-    from pico_ackermann_driver.driver_node import PicoAckermannDriver
-    n=NS(channels={'throttle':[0.,None,False]},command_limit=1.,command_conflict=False,delivered={},
-         send=lambda _:False,publish_state=lambda:None)
-    PicoAckermannDriver.on_command(n,'throttle',NS(data=.3))
+    n=make_driver(serial_port=object(),send=lambda _:False)
+    n.on_command('throttle',NS(data=.3))
     assert n.delivered=={}
 
 

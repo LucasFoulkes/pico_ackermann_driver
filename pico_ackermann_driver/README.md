@@ -19,7 +19,10 @@ owns GPIO assignments, PWM timing, actuator limits, and the final watchdog.
 Each command is written to the Pico as it arrives and reported on `/actuators/state`;
 the driver resends the latest one at `send_hz` (10 Hz) to keep the Pico's watchdog fed.
 Commands must arrive continuously. After 250 ms without a ROS command, the
-driver sends that channel's `stop`. After approximately 520 ms without a
+driver sends that channel's `stop`, and repeats it every second while the
+channel stays idle; a non-finite command (NaN, inf) sends it at once. The
+value reported delivered is the one written, after `command_limit` and
+rounding to 5 decimals. After approximately 520 ms without a
 valid serial command, the Pico independently stops the affected output.
 Steering and throttle use independent watchdog timestamps. A throttle `stop`
 brakes (bridge enabled, both sides low) so the car holds on a slope; a

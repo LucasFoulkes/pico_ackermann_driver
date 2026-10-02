@@ -28,6 +28,9 @@ PICO_RESTART = '\x02\r\x04\n'
 PICO_RESTART_PERIOD = 2.0  # s between restart attempts
 PICO_QUIET = 1.0  # s of silence after a restart before the Pico counts as running main.py
 PICO_OUTPUT_LOGGED = 200  # last bytes the Pico sent that a warning shows
+# An idle channel's stop is repeated this often, so an unplugged Pico (the
+# write fails) or one at the REPL (it answers) is noticed while idle too.
+STOP_REPEAT_NS = 1_000_000_000
 
 
 def clamp_command(value, limit=1.0):
@@ -102,8 +105,9 @@ class PicoAckermannDriver(Node):
         self.pico_answered = False  # the Pico sent something since then
         self.pico_output = b''  # what it sent, for the next warning
         self.state_pub = self.create_publisher(ActuatorState, '/actuators/state', 5)
+        # name -> [command, its arrival (monotonic ns), when its stop was last sent (monotonic ns)]
         self.channels = {
-            name: [0.0, None, False]
+            name: [0.0, None, None]
             for name in channels
         }
         self._subscriptions = [
@@ -122,22 +126,38 @@ class PicoAckermannDriver(Node):
             f'command_limit={self.command_limit}')
 
     def on_command(self, channel, message):
-        """Store a valid command and its monotonic arrival time."""
+        """Send a valid command at once; stop the channel at once on an invalid one."""
         state = self.channels[channel]
+        now = time.monotonic_ns()
         if not math.isfinite(message.data):
-            # Invalid input revokes the previous command immediately.
-            state[:] = [0.0, None, False]
+            # Invalid input revokes the previous command, on the Pico too.
+            state[:] = [0.0, None, None]
+            if self.send_stop(channel, now):
+                self.publish_state()
             return
-        state[0] = clamp_command(message.data, self.command_limit)
-        state[1] = time.monotonic_ns()
-        state[2] = False
+        state[:] = [clamp_command(message.data, self.command_limit), now, None]
         # Out now, not at the next keep-alive tick, and reported as delivered at once.
-        if not self.command_conflict and self.send(f'{channel} {state[0]:.5f}\n'):
-            self.delivered[channel] = (float(f'{state[0]:.5f}'), True)
+        if not self.command_conflict and self.send_command(channel, state[0]):
             self.publish_state()
 
+    def send_command(self, channel, value):
+        """Write a command; on success record the value the Pico parses as delivered."""
+        text = f'{value:.5f}'
+        if not self.send(f'{channel} {text}\n'):
+            return False
+        self.delivered[channel] = (float(text), True)
+        return True
+
+    def send_stop(self, channel, now):
+        """Write a channel's stop; on success record it and when it was sent."""
+        if not self.send(f'{channel} stop\n'):
+            return False
+        self.channels[channel][2] = now
+        self.delivered[channel] = (0.0, False)
+        return True
+
     def tick(self):
-        """Refresh active channels and stop channels that become stale."""
+        """Refresh fresh channels; stop the others, repeating it for a Pico that reset."""
         self.check_owners()
         if self.serial_port is None:
             self.connect()
@@ -146,19 +166,16 @@ class PicoAckermannDriver(Node):
 
         now = time.monotonic_ns()
         timeout_ns = int(self.input_timeout * 1_000_000_000)
-        for channel, state in self.channels.items():
-            value, updated_ns, stop_sent = state
+        for channel, (value, updated_ns, stopped_ns) in self.channels.items():
             fresh = (
                 not self.command_conflict
                 and updated_ns is not None
                 and now - updated_ns < timeout_ns
             )
             if fresh:
-                if self.send(f'{channel} {value:.5f}\n'):
-                    self.delivered[channel] = (float(f'{value:.5f}'), True)
-            elif not stop_sent and self.send(f'{channel} stop\n'):
-                state[2] = True
-                self.delivered[channel] = (0.0, False)
+                self.send_command(channel, value)
+            elif stopped_ns is None or now - stopped_ns >= STOP_REPEAT_NS:
+                self.send_stop(channel, now)
         self.publish_state()
 
     def check_owners(self):
@@ -171,7 +188,7 @@ class PicoAckermannDriver(Node):
         if conflict != self.command_conflict:
             self.get_logger().warning('multiple actuator publishers: stopping' if conflict else 'actuator ownership restored; waiting for fresh commands')
             for state in self.channels.values():
-                state[:] = [0.0, None, False]
+                state[:] = [0.0, None, None]
         self.command_conflict = conflict
 
     def watch_pico(self):
@@ -263,7 +280,7 @@ class PicoAckermannDriver(Node):
         self.pico_running = False
         self.delivered.clear()
         for state in self.channels.values():
-            state[2] = False
+            state[2] = None
 
     def close(self):
         """Stop every channel and release the port during clean shutdown."""
