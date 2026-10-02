@@ -3,7 +3,7 @@
 This repository contains two ROS 2 packages:
 
 - [`pico_ackermann_driver`](pico_ackermann_driver/README.md): USB serial driver, Pico firmware, configuration, and driver tests.
-- [`ackermann_interfaces`](ackermann_interfaces/README.md): shared `ActuatorState` message used by the driver, adaptive controller, and recovery nodes.
+- [`ackermann_interfaces`](ackermann_interfaces/README.md): shared messages: `ActuatorState` (the driver's delivery status, read by the adaptive controller) and `VehicleCapability` (what the adaptive controller learned, for planners).
 
 Clone this repository into your workspace `src` directory. Colcon discovers both packages automatically.
 

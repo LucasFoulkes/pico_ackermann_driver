@@ -8,6 +8,8 @@ owns GPIO assignments, PWM timing, actuator limits, and the final watchdog.
 
 - Subscribes: `/actuators/steering/command` and
   `/actuators/throttle/command` (`std_msgs/msg/Float32`)
+- Publishes: `/actuators/state` (`ackermann_interfaces/msg/ActuatorState`,
+  see Delivery status)
 - Input range: `[-1.0, 1.0]`
 - Serial protocol: `<channel> <value>` or `<channel> stop`
 - Pico steering output: GP2, 50 Hz servo pulses
@@ -41,7 +43,7 @@ disconnected and flash the firmware again. The driver's `command_limit`
 
 ```bash
 cd ~/ros2_ws
-colcon build --symlink-install --packages-select pico_ackermann_driver
+colcon build --symlink-install --packages-select ackermann_interfaces pico_ackermann_driver
 source install/setup.bash
 ```
 
