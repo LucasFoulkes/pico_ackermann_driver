@@ -55,7 +55,9 @@ sudo udevadm trigger
 ## Deploy the Pico firmware
 
 Stop the ROS driver before using `mpremote`; both require exclusive access
-to the same USB serial device.
+to the same USB serial device. `mpremote` commands such as `cp` stop
+`main.py` and leave the Pico at the REPL; `mpremote reset` starts it again,
+and so does the driver when it connects (see Delivery status).
 
 ```bash
 mpremote cp :main.py ~/pico-main-before-ackermann.py
@@ -118,6 +120,17 @@ activation and a ROS timestamp. This lets the adaptive learner align inputs to
 odometry and suspend updates on a disconnect. It is not measured wheel speed,
 steering angle or a firmware acknowledgment. A reconnect clears stop bookkeeping
 so the driver sends explicit stops for inactive channels again.
+
+`connected` means the port is open and the Pico runs its firmware. The
+firmware never writes to the port, so the driver reads it every tick: any
+byte comes from MicroPython's REPL (a traceback, a banner, an echo), which
+means something stopped `main.py` (typically a Ctrl-C from `mpremote`) and
+no command is applied. The driver then reports `connected: false`, logs
+what it received and sends Ctrl-B, CR, Ctrl-D (leave the raw REPL, end the
+typed line, soft reset, which runs `main.py` again), at most every 2 s. It
+sends the same line on every connect, since a Pico in the raw REPL echoes
+nothing; a running `main.py` rejects it as one invalid line. The Pico counts
+as running again once it stayed silent for 1 s after such a restart.
 
 The driver stops both channels when it detects multiple publishers on an
 actuator command topic (checked once a second). It resumes only after ownership is

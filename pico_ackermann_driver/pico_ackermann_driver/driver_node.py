@@ -14,6 +14,20 @@ from ackermann_interfaces.msg import ActuatorState
 
 CHANNEL_PATTERN = re.compile(r'^[A-Za-z0-9_]+$')
 TOPIC_PREFIX = '/actuators'
+# The firmware never writes to the port, so whatever the Pico sends comes from
+# MicroPython's REPL (a traceback, a banner, an echo): something stopped
+# main.py, typically a Ctrl-C byte from mpremote, and no command is applied.
+# This restarts it: Ctrl-B leaves the raw REPL (mpremote's), CR ends whatever
+# was typed into the friendly REPL, and Ctrl-D on the then empty line
+# soft-resets, which runs main.py again. A running main.py reads all of it as
+# one line it rejects (the CR splits it into at least two words, none of them a
+# channel followed by a value), so it is also safe to send when nothing is
+# wrong, and it ends a partial line a previous driver left without completing
+# it into a command.
+PICO_RESTART = '\x02\r\x04\n'
+PICO_RESTART_PERIOD = 2.0  # s between restart attempts
+PICO_QUIET = 1.0  # s of silence after a restart before the Pico counts as running main.py
+PICO_OUTPUT_LOGGED = 200  # last bytes the Pico sent that a warning shows
 
 
 def clamp_command(value, limit=1.0):
@@ -83,6 +97,10 @@ class PicoAckermannDriver(Node):
         self.command_conflict = False
         self.connect_error = None  # last reason the port would not open, logged once
         self.owner_check_at = 0.0
+        self.pico_running = False  # silent since the last restart: main.py applies the commands
+        self.pico_restart_at = 0.0  # monotonic time PICO_RESTART was last sent
+        self.pico_answered = False  # the Pico sent something since then
+        self.pico_output = b''  # what it sent, for the next warning
         self.state_pub = self.create_publisher(ActuatorState, '/actuators/state', 5)
         self.channels = {
             name: [0.0, None, False]
@@ -123,6 +141,8 @@ class PicoAckermannDriver(Node):
         self.check_owners()
         if self.serial_port is None:
             self.connect()
+        else:
+            self.watch_pico()
 
         now = time.monotonic_ns()
         timeout_ns = int(self.input_timeout * 1_000_000_000)
@@ -154,8 +174,42 @@ class PicoAckermannDriver(Node):
                 state[:] = [0.0, None, False]
         self.command_conflict = conflict
 
+    def watch_pico(self):
+        """Read what the Pico sent; restart it if it is at the REPL."""
+        now = time.monotonic()
+        try:
+            received = self.serial_port.read(self.serial_port.in_waiting)
+        except (serial.SerialException, OSError) as error:
+            self.disconnect(f'lost {self.port} ({type(error).__name__}: {error})')
+            return
+        if received:
+            self.pico_answered = True
+            self.pico_output = (self.pico_output + received)[-PICO_OUTPUT_LOGGED:]
+        if self.pico_answered and now - self.pico_restart_at >= PICO_RESTART_PERIOD:
+            self.get_logger().warning(
+                f'the Pico is not running its firmware, it sent {self.pico_output!r}; '
+                'soft-resetting it')
+            self.restart_pico(now)
+        running = (self.serial_port is not None and not self.pico_answered
+                   and now - self.pico_restart_at >= PICO_QUIET)
+        if running and not self.pico_running:
+            self.get_logger().info('the Pico runs its firmware')
+        self.pico_running = running
+
+    def restart_pico(self, now):
+        """Send PICO_RESTART and drop what the Pico sent before it."""
+        self.pico_running = False
+        self.pico_restart_at, self.pico_answered, self.pico_output = now, False, b''
+        if not self.send(PICO_RESTART):
+            return
+        try:
+            self.serial_port.reset_input_buffer()
+        except (serial.SerialException, OSError) as error:
+            self.disconnect(f'lost {self.port} ({type(error).__name__}: {error})')
+
     def publish_state(self):
-        connected = self.serial_port is not None
+        # Only a Pico running its firmware applies what was written.
+        connected = self.serial_port is not None and self.pico_running
         steer, steer_on = self.delivered.get('steering', (0.0, False))
         drive, drive_on = self.delivered.get('throttle', (0.0, False))
         msg = ActuatorState()
@@ -169,7 +223,7 @@ class PicoAckermannDriver(Node):
         self.state_pub.publish(msg)
 
     def connect(self):
-        """Open the configured serial device and clear a partial line."""
+        """Open the serial device and restart the Pico's firmware if it is not running."""
         try:
             self.serial_port = serial.Serial(
                 self.port,
@@ -185,7 +239,8 @@ class PicoAckermannDriver(Node):
             return
         self.connect_error = None
         self.get_logger().info(f'connected to {self.port}')
-        self.send('\n')
+        # A Pico left in the raw REPL echoes nothing, so this is sent unasked.
+        self.restart_pico(time.monotonic())
 
     def send(self, line):
         """Write one protocol line; on failure drop the port and return false."""
@@ -205,6 +260,7 @@ class PicoAckermannDriver(Node):
         if self.serial_port is not None:
             release_port(self.serial_port)
         self.serial_port = None
+        self.pico_running = False
         self.delivered.clear()
         for state in self.channels.values():
             state[2] = False

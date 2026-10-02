@@ -117,3 +117,18 @@ def test_ctrl_c_brakes_the_motor_first_and_cannot_cut_the_stops_short(monkeypatc
     motor_done = max(i for i, event in enumerate(after) if event[1] in (RPWM, LPWM, EN))
     assert all(event[1] != STEERING for event in after[:motor_done])
     assert levels(events)[-1] == {STEERING: 0, RPWM: 0, LPWM: 0, EN: 1}
+
+
+def test_the_restart_line_never_completes_a_stale_partial_line(monkeypatch):
+    from pico_ackermann_driver.driver_node import PICO_RESTART
+    restart=PICO_RESTART.encode('ascii')
+    for stale in (b'', b'throttle', b'throttle ', b'throttle 0.5', b'steering 1', b'steering 0.5 '):
+        events=run_firmware(monkeypatch, stale+restart)
+        assert not any(kind == 'ns' for kind, _, _ in events)
+        assert levels(events[:events.index(CTRL_C)])[-1] == {STEERING: 0, RPWM: 0, LPWM: 0, EN: 1}
+    # The bare newline the driver used to send turned the stale line into a command.
+    events=run_firmware(monkeypatch, b'throttle 0.5' + b'\n')
+    assert levels(events[:events.index(CTRL_C)])[-1][LPWM] > 0
+    # The command after the restart line is applied.
+    events=run_firmware(monkeypatch, b'throttle 0.5' + restart + b'throttle 0.5\n')
+    assert levels(events[:events.index(CTRL_C)])[-1][LPWM] > 0

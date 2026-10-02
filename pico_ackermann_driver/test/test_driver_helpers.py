@@ -39,6 +39,35 @@ class FakePort:
         self.events.append('close')
 
 
+def make_driver(**attributes):
+    """A driver with its real methods but no ROS node behind it."""
+    from types import SimpleNamespace as NS
+    from builtin_interfaces.msg import Time
+    from pico_ackermann_driver.driver_node import PicoAckermannDriver
+    node=PicoAckermannDriver.__new__(PicoAckermannDriver)
+    log, published = [], []
+    logger=NS(info=log.append,warning=log.append)
+    vars(node).update(
+        port='/dev/pico',baud=115200,serial_port=None,connect_error=None,delivered={},
+        channels={'steering':[0.,None,None],'throttle':[0.,None,None]},command_conflict=False,
+        command_limit=1.,input_timeout=.25,pico_running=False,pico_restart_at=0.,
+        pico_answered=False,pico_output=b'',log=log,published=published,
+        get_logger=lambda:logger,check_owners=lambda:None,
+        get_clock=lambda:NS(now=lambda:NS(to_msg=Time)),state_pub=NS(publish=published.append))
+    vars(node).update(attributes)
+    return node
+
+
+def use_clock(monkeypatch, start):
+    """Replace the driver's monotonic clock with one the test sets (clock.t, seconds)."""
+    from types import SimpleNamespace as NS
+    from pico_ackermann_driver import driver_node
+    clock=NS(t=start)
+    monkeypatch.setattr(driver_node,'time',NS(
+        monotonic=lambda:clock.t,monotonic_ns=lambda:round(clock.t*1e9),sleep=lambda _:None))
+    return clock
+
+
 def test_clamp_command():
     assert clamp_command(0.25) == 0.25
     assert clamp_command(2.0) == 1.0
@@ -100,7 +129,6 @@ def test_disconnect_revokes_delivered_state_and_rearms_stop_messages():
 
 
 def test_a_failed_write_on_connect_releases_the_port(monkeypatch):
-    from types import SimpleNamespace as NS
     from pico_ackermann_driver import driver_node
     import serial
     port=FakePort()
@@ -108,12 +136,8 @@ def test_a_failed_write_on_connect_releases_the_port(monkeypatch):
         raise serial.SerialTimeoutException('Write timeout')
     port.write=stalled
     monkeypatch.setattr(driver_node.serial,'Serial',lambda *args,**kwargs:port)
-    logger=NS(info=lambda *_:None,warning=lambda *_:None)
-    n=NS(port='/dev/pico',baud=115200,serial_port=None,connect_error=None,delivered={},channels={},
-         get_logger=lambda:logger)
-    n.send=lambda line:driver_node.PicoAckermannDriver.send(n,line)
-    n.disconnect=lambda reason:driver_node.PicoAckermannDriver.disconnect(n,reason)
-    driver_node.PicoAckermannDriver.connect(n)
+    n=make_driver()
+    n.connect()
     assert n.serial_port is None
     assert port.events==['reset_output','close']
 
@@ -124,7 +148,7 @@ def test_failed_write_is_never_reported_as_delivered_command():
     import time
     n=NS(serial_port=object(),input_timeout=.25,command_conflict=False,check_owners=lambda:None,
          channels={'throttle':[.4,time.monotonic_ns(),False]},delivered={},
-         send=lambda _:False,publish_state=lambda:None)
+         watch_pico=lambda:None,send=lambda _:False,publish_state=lambda:None)
     PicoAckermannDriver.tick(n)
     assert n.delivered=={}
 
@@ -169,3 +193,60 @@ def test_a_failed_write_on_arrival_is_not_reported_delivered():
          send=lambda _:False,publish_state=lambda:None)
     PicoAckermannDriver.on_command(n,'throttle',NS(data=.3))
     assert n.delivered=={}
+
+
+def test_repl_output_revokes_delivery_and_restarts_the_pico(monkeypatch):
+    # The firmware never writes: anything received means main.py stopped, here with a traceback.
+    use_clock(monkeypatch,100.)
+    port=FakePort(b'Traceback (most recent call last):\r\nKeyboardInterrupt: \r\n>>> ')
+    n=make_driver(serial_port=port,pico_running=True,pico_restart_at=50.)
+    n.delivered['throttle']=(.4,True)
+    n.watch_pico()
+    assert not n.pico_running
+    assert port.written==[b'\x02\r\x04\n']  # leave raw REPL, end the line, soft reset: main.py again
+    assert port.events==['reset_input']
+    assert any('KeyboardInterrupt' in line for line in n.log)
+    n.publish_state()
+    assert not n.published[-1].connected
+    assert not n.published[-1].throttle_active and n.published[-1].throttle==0.
+
+
+def test_restarts_are_rate_limited_and_a_quiet_pico_counts_as_running_again(monkeypatch):
+    clock=use_clock(monkeypatch,100.)
+    port=FakePort(b'>>> ')
+    n=make_driver(serial_port=port,pico_restart_at=50.)
+    n.watch_pico()
+    assert len(port.written)==1
+    port.incoming+=b'MPY: soft reboot\r\n'  # its answer to the restart
+    clock.t=100.1
+    n.watch_pico()
+    assert len(port.written)==1 and not n.pico_running  # no second restart within 2 s
+    clock.t=102.
+    n.watch_pico()
+    assert len(port.written)==2  # a running main.py rejects the line; nothing comes back
+    clock.t=102.9
+    n.watch_pico()
+    assert not n.pico_running
+    clock.t=103.
+    n.watch_pico()
+    assert n.pico_running
+    n.delivered['throttle']=(.4,True)
+    n.publish_state()
+    assert n.published[-1].connected and n.published[-1].throttle_active
+
+
+def test_connect_restarts_the_pico_and_waits_for_a_quiet_second(monkeypatch):
+    # A Pico in the raw REPL echoes nothing, so connecting sends the restart unasked; it also
+    # ends a partial line left by a previous driver without completing it (see test_firmware).
+    from pico_ackermann_driver import driver_node
+    clock=use_clock(monkeypatch,100.)
+    port=FakePort()
+    monkeypatch.setattr(driver_node.serial,'Serial',lambda *args,**kwargs:port)
+    n=make_driver()
+    n.connect()
+    assert n.serial_port is port and port.written==[b'\x02\r\x04\n']
+    n.watch_pico()
+    assert not n.pico_running
+    clock.t=101.
+    n.watch_pico()
+    assert n.pico_running
