@@ -26,6 +26,25 @@ def channel_topic(channel):
     return f'{TOPIC_PREFIX}/{channel}/command'
 
 
+def release_port(port, drain_s=0.0):
+    """Close a serial port without waiting on output a stalled Pico never takes.
+
+    Linux close() waits up to 30 s (closing_wait) for queued output to go out,
+    so wait at most drain_s for it, then discard the rest before closing.
+    """
+    deadline = time.monotonic() + drain_s
+    try:
+        while port.out_waiting and time.monotonic() < deadline:
+            time.sleep(0.01)
+    except (serial.SerialException, OSError):
+        pass
+    for step in (port.reset_output_buffer, port.close):
+        try:
+            step()
+        except (serial.SerialException, OSError):
+            pass
+
+
 class PicoAckermannDriver(Node):
     """Own the Pico serial port and enforce per-channel input timeouts."""
 
@@ -152,63 +171,53 @@ class PicoAckermannDriver(Node):
     def connect(self):
         """Open the configured serial device and clear a partial line."""
         try:
-            candidate = serial.Serial(
+            self.serial_port = serial.Serial(
                 self.port,
                 self.baud,
                 timeout=0,
                 write_timeout=0.1,
                 exclusive=True,
             )
-            if candidate.write(b'\n') != 1:
-                candidate.close()
-                return
-            self.serial_port = candidate
-            self.get_logger().info(f'connected to {self.port}')
         except (serial.SerialException, OSError) as error:
-            if self.serial_port is None and str(error) != self.connect_error:
+            if str(error) != self.connect_error:
                 self.get_logger().warning(f'cannot open {self.port}: {error}')
             self.connect_error = str(error)
-            self.serial_port = None
+            return
+        self.connect_error = None
+        self.get_logger().info(f'connected to {self.port}')
+        self.send('\n')
 
     def send(self, line):
-        """Return true only after writing one complete protocol line."""
+        """Write one protocol line; on failure drop the port and return false."""
         if self.serial_port is None:
             return False
-
-        payload = line.encode('ascii')
         try:
-            written = self.serial_port.write(payload)
-            if written == len(payload):
-                return True
-            self.disconnect('partial serial write')
+            # pyserial writes all of it or raises (SerialTimeoutException after write_timeout).
+            self.serial_port.write(line.encode('ascii'))
+            return True
         except (serial.SerialException, OSError) as error:
             self.disconnect(f'lost {self.port} ({type(error).__name__}: {error})')
-        return False
+            return False
 
     def disconnect(self, reason):
         """Close the current serial handle and log one transition."""
         self.get_logger().warning(f'{reason}; reconnecting')
         if self.serial_port is not None:
-            try:
-                self.serial_port.close()
-            except (serial.SerialException, OSError):
-                pass
+            release_port(self.serial_port)
         self.serial_port = None
         self.delivered.clear()
         for state in self.channels.values():
             state[2] = False
 
     def close(self):
-        """Release the serial device during clean process shutdown."""
+        """Stop every channel and release the port during clean shutdown."""
+        if self.serial_port is None:
+            return
+        for channel in self.channels:
+            self.send(f'{channel} stop\n')
         if self.serial_port is not None:
-            for channel in self.channels:
-                self.send(f'{channel} stop\n')
-            if self.serial_port is not None:
-                try:
-                    self.serial_port.close()
-                except (serial.SerialException, OSError):
-                    pass
-                self.serial_port = None
+            release_port(self.serial_port, drain_s=0.2)
+            self.serial_port = None
 
 
 def main(args=None):

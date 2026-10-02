@@ -6,6 +6,39 @@ from pico_ackermann_driver.driver_node import channel_topic
 from pico_ackermann_driver.driver_node import clamp_command
 
 
+class FakePort:
+    """A serial port that records what the driver does with it."""
+
+    def __init__(self, incoming=b''):
+        self.incoming=bytearray(incoming)
+        self.written=[]
+        self.events=[]
+        self.out_waiting=0
+
+    @property
+    def in_waiting(self):
+        return len(self.incoming)
+
+    def read(self, size):
+        data=bytes(self.incoming[:size])
+        del self.incoming[:size]
+        return data
+
+    def write(self, data):
+        self.written.append(data)
+        return len(data)
+
+    def reset_input_buffer(self):
+        self.events.append('reset_input')
+        self.incoming.clear()
+
+    def reset_output_buffer(self):
+        self.events.append('reset_output')
+
+    def close(self):
+        self.events.append('close')
+
+
 def test_clamp_command():
     assert clamp_command(0.25) == 0.25
     assert clamp_command(2.0) == 1.0
@@ -31,24 +64,58 @@ def test_invalid_input_revokes_the_previous_drive_command():
 def test_clean_shutdown_sends_channel_stops_before_closing():
     from types import SimpleNamespace as NS
     from pico_ackermann_driver.driver_node import PicoAckermannDriver
-    events=[]
-    n=NS(channels={'steering':None,'throttle':None},
-         serial_port=NS(close=lambda:events.append('closed')),
-         send=lambda line:events.append(line))
+    port=FakePort()
+    n=NS(channels={'steering':None,'throttle':None},serial_port=port,
+         send=lambda line:port.events.append(line))
     PicoAckermannDriver.close(n)
-    assert events==['steering stop\n','throttle stop\n','closed']
+    assert port.events==['steering stop\n','throttle stop\n','reset_output','close']
     assert n.serial_port is None
+
+
+def test_shutdown_waits_briefly_for_the_stops_then_discards_them():
+    # A stalled Pico takes nothing; close() alone would block up to 30 s (closing_wait).
+    from types import SimpleNamespace as NS
+    from pico_ackermann_driver.driver_node import PicoAckermannDriver
+    import time
+    port=FakePort()
+    port.out_waiting=17
+    n=NS(channels={'throttle':None},serial_port=port,send=lambda line:True)
+    start=time.monotonic()
+    PicoAckermannDriver.close(n)
+    assert time.monotonic()-start<1.
+    assert port.events==['reset_output','close']
 
 
 def test_disconnect_revokes_delivered_state_and_rearms_stop_messages():
     from types import SimpleNamespace as NS
     from pico_ackermann_driver.driver_node import PicoAckermannDriver
-    n=NS(serial_port=NS(close=lambda:None),delivered={'throttle':(.3,True)},
+    port=FakePort()
+    n=NS(serial_port=port,delivered={'throttle':(.3,True)},
          channels={'throttle':[0.,None,True]},get_logger=lambda:NS(warning=lambda *_:None))
     PicoAckermannDriver.disconnect(n,'test disconnect')
     assert n.serial_port is None
+    assert port.events==['reset_output','close']  # queued output discarded: close() cannot block
     assert n.delivered=={}
     assert not n.channels['throttle'][2]
+
+
+def test_a_failed_write_on_connect_releases_the_port(monkeypatch):
+    from types import SimpleNamespace as NS
+    from pico_ackermann_driver import driver_node
+    import serial
+    port=FakePort()
+    def stalled(_):
+        raise serial.SerialTimeoutException('Write timeout')
+    port.write=stalled
+    monkeypatch.setattr(driver_node.serial,'Serial',lambda *args,**kwargs:port)
+    logger=NS(info=lambda *_:None,warning=lambda *_:None)
+    n=NS(port='/dev/pico',baud=115200,serial_port=None,connect_error=None,delivered={},channels={},
+         get_logger=lambda:logger)
+    n.send=lambda line:driver_node.PicoAckermannDriver.send(n,line)
+    n.disconnect=lambda reason:driver_node.PicoAckermannDriver.disconnect(n,reason)
+    driver_node.PicoAckermannDriver.connect(n)
+    assert n.serial_port is None
+    assert port.events==['reset_output','close']
 
 
 def test_failed_write_is_never_reported_as_delivered_command():
