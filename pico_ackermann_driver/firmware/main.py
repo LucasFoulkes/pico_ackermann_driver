@@ -9,6 +9,7 @@ import sys
 from time import sleep_ms, ticks_diff, ticks_ms
 
 from machine import Pin, PWM
+import micropython
 
 
 WATCHDOG_MS = 500
@@ -189,5 +190,10 @@ try:
 
         sleep_ms(1)
 finally:
-    for device in CHANNELS.values():
-        device.stop()
+    # Whatever ended the loop (Ctrl-C, an error): brake the motor first, then
+    # end the servo pulses. From here on Ctrl-C is an ordinary byte, so a
+    # second one cannot cut the stops short; the REPL enables it again for
+    # whatever it runs next.
+    micropython.kbd_intr(-1)
+    CHANNELS['throttle'].stop()
+    CHANNELS['steering'].stop()

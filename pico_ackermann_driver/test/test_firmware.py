@@ -14,6 +14,7 @@ from types import ModuleType, SimpleNamespace as NS
 FIRMWARE = Path(__file__).resolve().parents[1] / 'firmware' / 'main.py'
 STEERING, RPWM, LPWM, EN = 2, 4, 5, 6
 LOOP = ('loop', None, None)  # logged when the main loop first waits for input
+CTRL_C = ('ctrl-c', None, None)  # logged when the input runs out and Ctrl-C ends the loop
 
 
 def run_firmware(monkeypatch, data=b''):
@@ -51,6 +52,7 @@ def run_firmware(monkeypatch, data=b''):
             if pending:
                 return [True]
             if timeout:
+                events.append(CTRL_C)
                 raise KeyboardInterrupt
             return []
 
@@ -62,7 +64,7 @@ def run_firmware(monkeypatch, data=b''):
 
     modules = {
         'machine': NS(Pin=Pin, PWM=PWM),
-        'micropython': NS(kbd_intr=lambda char: events.append(('kbd_intr', char))),
+        'micropython': NS(kbd_intr=lambda char: events.append(('kbd_intr', None, char))),
         'select': NS(poll=Poll, POLLIN=1),
         'time': NS(sleep_ms=sleep_ms, ticks_ms=lambda: clock[0], ticks_diff=lambda a, b: a - b),
     }
@@ -105,3 +107,13 @@ def test_commands_are_clamped_to_the_installed_range(monkeypatch):
     assert max(value for kind, number, value in events if kind == 'ns') == 2_000_000
     assert min(value for kind, number, value in events if kind == 'ns') == 1_000_000
     assert max(value for kind, number, value in events if kind == 'duty') == 65_535
+
+
+def test_ctrl_c_brakes_the_motor_first_and_cannot_cut_the_stops_short(monkeypatch):
+    events = run_firmware(monkeypatch, b'steering 0.5\nthrottle 0.5\n')
+    assert levels(events[:events.index(CTRL_C)])[-1][LPWM] > 0  # driving when Ctrl-C comes
+    after = events[events.index(CTRL_C) + 1:]
+    assert after[0] == ('kbd_intr', None, -1)
+    motor_done = max(i for i, event in enumerate(after) if event[1] in (RPWM, LPWM, EN))
+    assert all(event[1] != STEERING for event in after[:motor_done])
+    assert levels(events)[-1] == {STEERING: 0, RPWM: 0, LPWM: 0, EN: 1}
