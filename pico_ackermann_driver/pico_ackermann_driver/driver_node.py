@@ -6,6 +6,7 @@ import re
 import time
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 import serial
 from std_msgs.msg import Float32
@@ -74,8 +75,9 @@ class PicoAckermannDriver(Node):
             'port', '/dev/pico-ackermann').value
         self.baud = self.declare_parameter('baud', 115200).value
         # Commands go to the Pico as they arrive; this rate only resends them (the Pico stops a
-        # channel after ~0.5 s without one) and stops stale channels. At 50 Hz the wake-ups of this
-        # Python node, not the serial writes, were its CPU (2026-09-30).
+        # channel after ~0.5 s without one), stops stale channels, reads the port and publishes
+        # /actuators/state. At 50 Hz the wake-ups of this Python node, not the serial writes,
+        # were its CPU (2026-09-30).
         send_hz = self.declare_parameter('send_hz', 10.0).value
         self.command_limit = self.declare_parameter(
             'command_limit', 1.0).value
@@ -110,15 +112,13 @@ class PicoAckermannDriver(Node):
             name: [0.0, None, None]
             for name in channels
         }
-        self._subscriptions = [
+        for name in channels:  # the node keeps its subscriptions
             self.create_subscription(
                 Float32,
                 channel_topic(name),
                 lambda message, name=name: self.on_command(name, message),
                 1,
             )
-            for name in channels
-        ]
         self.timer = self.create_timer(1.0 / send_hz, self.tick)
 
         self.get_logger().info(
@@ -299,7 +299,7 @@ def main(args=None):
     node = PicoAckermannDriver()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):  # rclpy turns SIGINT/SIGTERM into the latter
         pass
     finally:
         node.close()
