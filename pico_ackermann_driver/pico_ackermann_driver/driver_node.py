@@ -69,7 +69,7 @@ class PicoAckermannDriver(Node):
         super().__init__('pico_ackermann_driver')
 
         channels = list(
-            self.declare_parameter('channels', ['steering']).value)
+            self.declare_parameter('channels', ['steering', 'throttle']).value)
         self.port = self.declare_parameter(
             'port', '/dev/pico-ackermann').value
         self.baud = self.declare_parameter('baud', 115200).value

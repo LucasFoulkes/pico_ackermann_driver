@@ -78,14 +78,27 @@ source ~/ros2_ws/install/setup.bash
 ros2 run pico_ackermann_driver pico_ackermann_driver
 ```
 
-Run `dualshock4_teleop` in a separate terminal, or use the application-level
-`robot` package to start the complete system.
+Parameters (defaults; override with `--ros-args -p name:=value`):
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `channels` | `[steering, throttle]` | Channels to drive; each subscribes to `/actuators/<channel>/command` |
+| `port` | `/dev/pico-ackermann` | Serial device (alias from the udev rule) |
+| `baud` | `115200` | Serial baud rate (USB CDC ignores it) |
+| `send_hz` | `10.0` | Keep-alive, port read and `/actuators/state` rate |
+| `command_limit` | `1.0` | Clamp on commands, in `(0, 1]` |
+| `input_timeout` | `0.25` | Seconds without a ROS command before a channel is stopped |
+
+On the robot the complete system is started by the `lukuma` package's
+`drive.launch.py`, which passes its own parameter file.
 
 ## Servo power
 
 Power the servo from a supply sized for its stall current, not the Pico 3V3
 pin. Connect the servo supply ground and Pico ground. Begin powered tests
-with the teleop mapper's `scale` set to `0.1`.
+with small commands, for example
+`ros2 topic pub -r 10 /actuators/steering/command std_msgs/msg/Float32 "{data: 0.1}"`
+with only the driver running.
 
 ## Traction motor wiring
 
