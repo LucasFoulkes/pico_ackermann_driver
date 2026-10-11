@@ -14,7 +14,7 @@ owns GPIO assignments, PWM timing, actuator limits, and the final watchdog.
 - Serial protocol: `<channel> <value>` or `<channel> stop`
 - Pico steering output: GP2, 50 Hz servo pulses
 - Servo calibration: installed linkage, 1000/1500/2000 microseconds
-- Pico throttle outputs: RPWM GP4, LPWM GP5, enable GP6, 20 kHz
+- Pico throttle outputs: RPWM GP8, LPWM GP5, enable GP6, 20 kHz
 - Throttle bridge: HW-039/BTS7960; positive commands drive the installed
   motor forward through the firmware's explicit polarity setting
 
@@ -106,7 +106,7 @@ with only the driver running.
 
 | HW-039 pin | Pico connection |
 |---|---|
-| RPWM | GP4 |
+| RPWM | GP8 (physical pin 11; was GP4, which stopped driving reverse on 2026-10-10) |
 | LPWM | GP5 |
 | R_EN and L_EN tied together | GP6 |
 | VCC | Pico VBUS 5 V (physical pin 40) |
@@ -114,8 +114,8 @@ with only the driver running.
 | R_IS, L_IS | Not connected |
 
 Connect the motor battery only to `B+`/`B-` and the motor to `M+`/`M-`.
-Never connect the traction battery to a Pico power pin. GP4/GP5 share PWM
-slice 2 at 20 kHz; the steering servo remains on GP2/slice 1 at 50 Hz.
+Never connect the traction battery to a Pico power pin. GP8 (slice 4) and GP5
+(slice 2) run at 20 kHz; the steering servo remains on GP2/slice 1 at 50 Hz.
 The module logic supply is 5 V, while its RPWM, LPWM, and enable inputs accept
 the Pico's 3.3 V GPIO levels. Never connect VBUS 5 V to a Pico GPIO.
 

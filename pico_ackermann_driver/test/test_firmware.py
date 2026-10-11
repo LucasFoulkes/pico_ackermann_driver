@@ -12,7 +12,7 @@ import sys
 from types import ModuleType, SimpleNamespace as NS
 
 FIRMWARE = Path(__file__).resolve().parents[1] / 'firmware' / 'main.py'
-STEERING, RPWM, LPWM, EN = 2, 4, 5, 6
+STEERING, RPWM, LPWM, EN = 2, 8, 5, 6
 LOOP = ('loop', None, None)  # logged when the main loop first waits for input
 CTRL_C = ('ctrl-c', None, None)  # logged when the input runs out and Ctrl-C ends the loop
 

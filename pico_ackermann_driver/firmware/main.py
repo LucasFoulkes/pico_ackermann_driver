@@ -26,7 +26,9 @@ STEERING_MIN_US = 1000
 STEERING_CENTER_US = 1500
 STEERING_MAX_US = 2000
 
-THROTTLE_RPWM_PIN = 4
+# GP8 (physical pin 11), its own PWM slice. Was GP4 (pin 6): on 2026-10-10 reverse stopped working, and driving
+# GP4 directly from the REPL (50% for 1 s, our code bypassed) did not move the car while GP5 did (1 m in 1 s).
+THROTTLE_RPWM_PIN = 8
 THROTTLE_LPWM_PIN = 5
 THROTTLE_EN_PIN = 6
 THROTTLE_FREQ_HZ = 20_000
