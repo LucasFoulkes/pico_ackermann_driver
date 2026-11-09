@@ -13,10 +13,13 @@ owns GPIO assignments, PWM timing, actuator limits, and the final watchdog.
 - Input range: `[-1.0, 1.0]`
 - Serial protocol: `<channel> <value>` or `<channel> stop`
 - Pico steering output: GP2, 50 Hz servo pulses
-- Servo calibration: installed linkage, 1000/1500/2000 microseconds
-- Pico throttle outputs: RPWM GP8, LPWM GP5, enable GP6, 20 kHz
-- Throttle bridge: HW-039/BTS7960; positive commands drive the installed
-  motor forward through the firmware's explicit polarity setting
+- Servo calibration: installed linkage, 1000/1500/2000 microseconds at
+  commands -1/0/1 (positive turns left)
+- Pico throttle output: GP8, 50 Hz pulses to the truck's brushed ESC,
+  1500 us neutral, 2000-1000 us at commands -1 and 1 (inverted: this ESC
+  drives forward on the short pulses)
+- Throttle ramp: speeding up and reversing at most 2 units/s (0 to full in
+  0.5 s); slowing towards neutral is immediate
 
 Each command is written to the Pico as it arrives and reported on `/actuators/state`;
 the driver resends the latest one at `send_hz` (10 Hz) to keep the Pico's watchdog fed.
@@ -27,8 +30,9 @@ value reported delivered is the one written, after `command_limit` and
 rounding to 5 decimals. After approximately 520 ms without a
 valid serial command, the Pico independently stops the affected output.
 Steering and throttle use independent watchdog timestamps. A throttle `stop`
-brakes (bridge enabled, both sides low) so the car holds on a slope; a
-steering `stop` ends the servo pulses.
+holds neutral at once (pulses continue, so the ESC stays armed; whether the
+car holds on a slope depends on the ESC's drag brake); a steering `stop` ends
+the servo pulses.
 
 ## Command limits and servo calibration
 
@@ -104,38 +108,37 @@ with only the driver running.
 
 ## Traction motor wiring
 
-| HW-039 pin | Pico connection |
+The motor runs from the truck's own brushed ESC, set to forward/reverse (F/R)
+mode so a negative command reverses without the brake, neutral, reverse
+sequence. It replaced a HW-039/BTS7960 bridge on 2026-10-10 after one of that
+module's half-bridges shorted.
+
+| ESC lead | Connection |
 |---|---|
-| RPWM | GP8 (physical pin 11; was GP4, which stopped driving reverse on 2026-10-10) |
-| LPWM | GP5 |
-| R_EN and L_EN tied together | GP6 |
-| VCC | Pico VBUS 5 V (physical pin 40) |
-| GND | Pico/battery common ground |
-| R_IS, L_IS | Not connected |
+| Signal (white/yellow) | GP8 (physical pin 11) |
+| Ground (black/brown) | Pico ground |
+| Red (ESC BEC output) | Not connected to the Pico |
 
-Connect the motor battery only to `B+`/`B-` and the motor to `M+`/`M-`.
-Never connect the traction battery to a Pico power pin. GP8 (slice 4) and GP5
-(slice 2) run at 20 kHz; the steering servo remains on GP2/slice 1 at 50 Hz.
-The module logic supply is 5 V, while its RPWM, LPWM, and enable inputs accept
-the Pico's 3.3 V GPIO levels. Never connect VBUS 5 V to a Pico GPIO.
+Connect the battery and motor to the ESC as in the truck. Never connect the
+traction battery or the ESC's red lead to a Pico pin. GP8 (slice 4) and the
+steering servo on GP2 (slice 1) both run at 50 Hz.
 
-At start the firmware drives GP6 low, sets both PWM outputs to 0 and only
-then drives GP6 high: the motor brakes from boot, so a Pico reset (for
-example a brown-out) does not let the car roll on a slope. The steering
-servo gets no pulses until the first steering command.
+From boot the firmware sends neutral, which the ESC needs before it arms; it
+never sees throttle until a command arrives. Before `main.py` starts the ESC
+gets no pulses and stays disarmed or in its own failsafe. Flip
+`THROTTLE_INVERT` in `firmware/main.py` (now `True`) if a positive command
+drives the car backwards.
 
-Between power-up and the start of `main.py` the bridge is disabled
-(the motor freewheels): RP2040 pads come out of reset as inputs with weak
-internal pull-downs (roughly 50 kOhm), which hold the enable low. Fit an
-external pull-down (for example 10 kOhm) from the tied enable input to
-ground if that low must not depend on the internal pull-down.
+The firmware raises the throttle by at most 2 units per second (lowering is
+immediate), so the motor can lag a rising command by up to 0.5 s.
 
 ## Delivery status
 
 `/actuators/state` (`ackermann_interfaces/msg/ActuatorState`) reports normalized
 commands successfully written to the serial link, connection status, channel
 activation and a ROS timestamp. This lets the adaptive learner align inputs to
-odometry and suspend updates on a disconnect. It is not measured wheel speed,
+odometry and suspend updates on a disconnect. It is the command as written,
+before the firmware's throttle ramp. It is not measured wheel speed,
 steering angle or a firmware acknowledgment. A reconnect clears stop bookkeeping
 so the driver sends explicit stops for inactive channels again.
 

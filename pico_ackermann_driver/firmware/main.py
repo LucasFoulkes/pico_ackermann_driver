@@ -21,18 +21,24 @@ COMMAND_LIMIT = 1.0
 STEERING_PIN = 2
 STEERING_FREQ_HZ = 50
 # Installed linkage travel at commands -1, 0 and 1. To recalibrate, edit these
-# with the linkage disconnected and flash again.
+# with the linkage disconnected and flash again. Command 1 is full left (ROS:
+# positive steering turns left): this servo turns left on the long pulses. (A
+# swap on 2026-10-14 made 1 turn right; 648 turning samples showed it, undone.)
 STEERING_MIN_US = 1000
 STEERING_CENTER_US = 1500
 STEERING_MAX_US = 2000
 
-# GP8 (physical pin 11), its own PWM slice. Was GP4 (pin 6): on 2026-10-10 reverse stopped working, and driving
-# GP4 directly from the REPL (50% for 1 s, our code bypassed) did not move the car while GP5 did (1 m in 1 s).
-THROTTLE_RPWM_PIN = 8
-THROTTLE_LPWM_PIN = 5
-THROTTLE_EN_PIN = 6
-THROTTLE_FREQ_HZ = 20_000
-THROTTLE_INVERT = True
+# Brushed RC car ESC (the truck's own, set to F/R mode) on GP8, physical pin 11:
+# 50 Hz servo pulses, neutral at the center. Replaced a HW-039/BTS7960 bridge on
+# 2026-10-10 after one of its half-bridges shorted.
+THROTTLE_PIN = 8
+THROTTLE_FREQ_HZ = 50
+THROTTLE_NEUTRAL_US = 1500
+THROTTLE_SPAN_US = 500  # pulse at command 1 is NEUTRAL + SPAN, at -1 NEUTRAL - SPAN
+THROTTLE_INVERT = True  # this ESC drives forward on the short pulses (2026-10-14)
+# Speeding up and reversing are limited to this many command units per second,
+# so 0 to full takes 0.5 s; slowing towards neutral is immediate.
+THROTTLE_RAMP_PER_S = 2.0
 
 
 class Servo:
@@ -45,7 +51,7 @@ class Servo:
         self.pwm = PWM(Pin(pin), freq=freq, duty_u16=0)
 
     def set_command(self, value):
-        """Set a finite position command, clamped to min_us..max_us."""
+        """Set a finite position command, clamped to -1..1 (min_us..max_us)."""
         value = max(-COMMAND_LIMIT, min(COMMAND_LIMIT, value))
         if value >= 0:
             pulse_us = (
@@ -64,45 +70,49 @@ class Servo:
         self.pwm.duty_u16(0)
 
 
-class Motor:
-    """Drive an HW-039/BTS7960 using signed normalized commands."""
+class Esc:
+    """Drive a brushed RC ESC in forward/reverse mode from ramped commands."""
 
-    def __init__(self, rpwm_pin, lpwm_pin, en_pin, freq, invert=False):
-        # The shared enable goes low before either PWM output is touched (after
-        # a soft reset the pins hold what the previous run left on them), and
-        # high only once both duties are 0: braked from boot, so a car reset by
-        # a brown-out on a slope holds instead of rolling.
-        self.en = Pin(en_pin, Pin.OUT, value=0)
-        self.rpwm = PWM(Pin(rpwm_pin), freq=freq, duty_u16=0)
-        self.lpwm = PWM(Pin(lpwm_pin), freq=freq, duty_u16=0)
+    def __init__(self, pin, neutral_us, span_us, freq, ramp_per_s, invert=False):
+        # Neutral pulses from boot: the ESC arms only after it sees neutral,
+        # and a Pico reset must not leave it holding the last throttle.
+        self.neutral_us = neutral_us
+        self.span_us = span_us
+        self.ramp_per_s = ramp_per_s
         self.invert = invert
-        self.stop()
+        self.target = 0.0
+        self.value = 0.0
+        self.last_ms = ticks_ms()
+        self.pwm = PWM(Pin(pin), freq=freq, duty_u16=0)
+        self.write()
 
     def set_command(self, value):
-        """Set direction from the sign and duty from the magnitude."""
+        """Set the target the output ramps to, clamped to the command limit."""
         value = max(-COMMAND_LIMIT, min(COMMAND_LIMIT, value))
-        if self.invert:
-            value = -value
-        duty = int(abs(value) * 65_535)
+        self.target = -value if self.invert else value
+        self.update(ticks_ms())
 
-        if value >= 0:
-            self.lpwm.duty_u16(0)
-            self.rpwm.duty_u16(duty)
+    def update(self, now):
+        """Move the output towards the target; call it every loop pass."""
+        elapsed = ticks_diff(now, self.last_ms)
+        self.last_ms = now
+        if self.target * self.value < 0:
+            self.value = 0.0  # a reversal first drops to neutral
+        if abs(self.target) <= abs(self.value):
+            self.value = self.target
         else:
-            self.rpwm.duty_u16(0)
-            self.lpwm.duty_u16(duty)
-        self.en.value(1)
+            step = self.ramp_per_s * elapsed / 1000
+            self.value += max(-step, min(step, self.target - self.value))
+        self.write()
+
+    def write(self):
+        self.pwm.duty_ns(int((self.neutral_us + self.value * self.span_us) * 1000))
 
     def stop(self):
-        """Brake: both half-bridges low with the bridge enabled.
-
-        Disabling the bridge would let the motor freewheel, and a car parked
-        on a hill would roll away whenever the Pi, USB or the driver drops.
-        The bridge is disabled only from power-up until this firmware starts.
-        """
-        self.rpwm.duty_u16(0)
-        self.lpwm.duty_u16(0)
-        self.en.value(1)
+        """Hold neutral at once; pulses continue so the ESC stays armed."""
+        self.target = 0.0
+        self.value = 0.0
+        self.write()
 
 
 CHANNELS = {
@@ -113,14 +123,16 @@ CHANNELS = {
         STEERING_MAX_US,
         STEERING_FREQ_HZ,
     ),
-    'throttle': Motor(
-        THROTTLE_RPWM_PIN,
-        THROTTLE_LPWM_PIN,
-        THROTTLE_EN_PIN,
+    'throttle': Esc(
+        THROTTLE_PIN,
+        THROTTLE_NEUTRAL_US,
+        THROTTLE_SPAN_US,
         THROTTLE_FREQ_HZ,
+        THROTTLE_RAMP_PER_S,
         THROTTLE_INVERT,
     ),
 }
+throttle = CHANNELS['throttle']
 
 last_ok = {}
 enabled = {}
@@ -189,13 +201,15 @@ try:
             ):
                 device.stop()
                 enabled[name] = False
+        throttle.update(now)
 
         sleep_ms(1)
 finally:
-    # Whatever ended the loop (Ctrl-C, an error): brake the motor first, then
-    # end the servo pulses. From here on Ctrl-C is an ordinary byte, so a
-    # second one cannot cut the stops short; the REPL enables it again for
-    # whatever it runs next.
+    # Whatever ended the loop (Ctrl-C, an error): throttle to neutral first,
+    # then end the servo pulses. The PWM hardware keeps sending neutral after
+    # main.py ends, so the ESC stays armed and stopped. From here on Ctrl-C is
+    # an ordinary byte, so a second one cannot cut the stops short; the REPL
+    # enables it again for whatever it runs next.
     micropython.kbd_intr(-1)
     CHANNELS['throttle'].stop()
     CHANNELS['steering'].stop()
