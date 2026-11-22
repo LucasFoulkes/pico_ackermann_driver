@@ -92,6 +92,13 @@ class PicoAckermannDriver(Node):
             raise ValueError('send_hz must be greater than zero')
         if not 0 < self.command_limit <= 1.0:  # the firmware clamps to 1 as well
             raise ValueError('command_limit must be in (0, 1]')
+        self.channel_limits = {}
+        for name in channels:
+            lim = float(self.declare_parameter(f'{name}_limit', 0.0).value)
+            lim = self.command_limit if lim == 0.0 else lim
+            if not 0 < lim <= 1.0:
+                raise ValueError(f'{name}_limit must be in (0, 1]')
+            self.channel_limits[name] = lim
         if self.input_timeout <= 0:
             raise ValueError('input_timeout must be greater than zero')
         if self.baud <= 0:
@@ -123,7 +130,7 @@ class PicoAckermannDriver(Node):
 
         self.get_logger().info(
             f'channels={channels} port={self.port} '
-            f'command_limit={self.command_limit}')
+            f'limits={self.channel_limits}')
 
     def on_command(self, channel, message):
         """Send a valid command at once; stop the channel at once on an invalid one."""
@@ -135,10 +142,14 @@ class PicoAckermannDriver(Node):
             if self.send_stop(channel, now):
                 self.publish_state()
             return
-        state[:] = [clamp_command(message.data, self.command_limit), now, None]
-        # Out now, not at the next keep-alive tick, and reported as delivered at once.
+        limit = getattr(self, 'channel_limits', {}).get(channel, self.command_limit)
+        state[:] = [clamp_command(message.data, limit), now, None]
+        # Out now, not at the next keep-alive tick; only publish state immediately when the
+        # delivered value actually changed (tick() already publishes steady state at send_hz).
+        prev = self.delivered.get(channel)
         if not self.command_conflict and self.send_command(channel, state[0]):
-            self.publish_state()
+            if self.delivered.get(channel) != prev:
+                self.publish_state()
 
     def send_command(self, channel, value):
         """Write a command; on success record the value the Pico parses as delivered."""
